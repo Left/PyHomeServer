@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import logging
 import subprocess
 import re
+import os
 import socket
 from urllib.request import urlopen
 from socketserver import ThreadingMixIn
@@ -28,7 +29,6 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             subprocess.Popen("adb connect 192.168.121.166:5556", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
             # And try again
             subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
-
 
     def stopCurrent(self):
         self.adbShellCommand("killall org.videolan.vlc")
@@ -67,7 +67,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             ind = ind + 1
  
     def do_GET(self):
-        logging.info("GET request,\nPath: %s\nHeaders:\n%s\n", str(self.path), str(self.headers))
+        logging.info("GET request,\nPath: %s\n\n", str(self.path))
         pathList = list(filter(None, self.path.split("/")))
         
         if len(pathList) == 0:
@@ -77,71 +77,28 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'text/html')
             self.end_headers()
 
-            self.wfile.write("""
-                <head>
-                    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">
-                    <script type="text/javascript">
-                        function sendReq(url) {
-                            var xhr = new XMLHttpRequest();
-                            xhr.open("POST", url, false);
-                            xhr.onload = function() {};
-                            xhr.send(); 
-                        }
-
-                        window.onload = function() {
-                            document.getElementById('birghtness').addEventListener('input', 
-                                function(e) {
-                                    console.log('BRIGHT', e.srcElement.value);
-                                    sendReq("/light/brightness/" + e.srcElement.value);
-                                }, false);
-
-                            Array.prototype.filter.call(document.getElementsByClassName('action'),
-                                function(el) {
-                                    el.addEventListener("click",
-                                        function() { 
-                                            sendReq(el.dataset.url);
-                                        },
-                                        false
-                                    );
-                                }
-                            );
-                        }
-                    </script>
-                </head>""".encode('utf-8'))
-            self.wfile.write("<body>".encode('utf-8'))
-            self.wfile.write("""
-                <div>
-                    <button class='action' data-url='/tablet/onoff'  >    POWER    </button>
-                    <button class='action' data-url='/tablet/volup'  >   + Vol +   </button>
-                    <button class='action' data-url='/tablet/voldown'>   - Vol -   </button>
-                    <button class='action' data-url='/tablet/stop'   >     STOP    </button>
-                    <button class='action' data-url='/tablet/reboot' >    REBOOT   </button>
-                    <button class='action' data-url='/light/on     ' > LIGHT ON </button>
-                    <button class='action' data-url='/light/off    ' > LIGHT OFF </button>
-                    <input type="range" id="birghtness" name="birghtness" min="0" max="100" />
-                </div>""".encode('utf-8'))
+            htmlContent = ""
+            with open(os.path.dirname(os.path.abspath(__file__)) + '/web/index.html', 'r') as myfile:
+                htmlContent = myfile.read()
 
             strr = ""
             
             currName = None
             btns = ""
-            ind = 1
+
             for ytb in self.youtubeChannels:
-                btns += "<button class='action' data-url='/tablet/play/" + str(ytb["index"]) + "'> Play (" + str(ind) + ") </button>"
                 if currName != ytb["name"] and currName != None:
-                    strr += "<div>" + currName + "&nbsp;" + btns + "</div>"
+                    strr += "<div class='channel-line'>" + currName + "&nbsp;" + btns + "</div>" + "\n"
                     btns = ""
-                    ind = 1
-                else:
-                    ind = ind + 1
+                btns += "<button class='action' data-url='/tablet/play/" + str(ytb["index"]) + "'  data-uri='" + ytb["url"] + "' data-name='" + ytb["name"] + "'> Play </button>" + "\n"
                 currName = ytb["name"]
 
             if len(btns) > 0:
-                strr += "<div>" + currName + btns + "</div>"
+                strr += "<div class='channel-line'>" + currName + "&nbsp;" + btns + "</div>" + "\n"
 
-            self.wfile.write(strr.encode('utf-8'))
+            htmlContent = htmlContent.replace("<!--{{{channels}}}-->", strr)
 
-            self.wfile.write("</body>".encode('utf-8'))
+            self.wfile.write(htmlContent.encode('utf-8'))
         else:
             self.writeResult("UNKNOWN CMD {}".format(self.path))
 

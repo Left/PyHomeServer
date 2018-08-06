@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <script type="text/javascript">
+        function sendReq(url) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", url, false);
+            xhr.onload = function() {};
+            xhr.send(); 
+        }
+
+        window.onload = function() {
+            document.getElementById('birghtness').addEventListener('input', 
+                function(e) {
+                    console.log('BRIGHT', e.srcElement.value);
+                    sendReq("/light/brightness/" + e.srcElement.value);
+                }, false);
+
+            Array.prototype.filter.call(document.getElementsByClassName('action'),
+                function(el) {
+                    el.addEventListener("click",
+                        function() { 
+                            sendReq(el.dataset.url);
+                        },
+                        false
+                    );
+                }
+            );
+        }
+    </script>
+    <style>
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+        }
+
+        .header {
+            position: fixed;
+            background: white;
+            top: 0;
+            padding: 1em;
+            width: 100%
+        }
+
+        .channels {
+            padding-top: 100px;
+            margin: .5em;
+        }
+
+        .channel-line {
+            height: 2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+            <div>
+                <button class='action' data-url='/tablet/onoff'  >    POWER    </button>
+                <button class='action' data-url='/tablet/volup'  >   + Vol +   </button>
+                <button class='action' data-url='/tablet/voldown'>   - Vol -   </button>
+                <button class='action' data-url='/tablet/stop'   >     STOP    </button>
+                <button class='action' data-url='/tablet/reboot' >    REBOOT   </button>
+            </div>
+            <hr/>
+            <div>
+                <button class='action' data-url='/light/on     ' > LIGHT ON </button>
+                <button class='action' data-url='/light/off    ' > LIGHT OFF </button>
+                <input type="range" id="birghtness" name="birghtness" min="0" max="100" />
+            </div>
+        </div>
+    <div class='channels'>
+        <!--{{{channels}}}-->
+    </div>
+
+</body>
+
+</html>
