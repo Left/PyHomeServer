@@ -8,20 +8,23 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import logging
 import subprocess
 import re
+import socket
 from urllib.request import urlopen
+from socketserver import ThreadingMixIn
 
-class MyServer(BaseHTTPRequestHandler):
-    def _set_response(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-
+class HomeHTTPHandler(BaseHTTPRequestHandler):
     youtubeChannel = 0
     youtubeChannels = []
 
+    def writeResult(self, res):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json;charset=utf-8')
+        self.end_headers()
+        self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
+
     def adbShellCommand(self, command):
         resultStr = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read()
-        if b'error: no devices/emulators found' in resultStr:
+        if len(resultStr) > 0:
             subprocess.Popen("adb connect 192.168.121.166:5556", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
             # And try again
             subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
@@ -37,6 +40,10 @@ class MyServer(BaseHTTPRequestHandler):
         self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -d \"" + 
                 self.youtubeChannels[self.youtubeChannel]["url"] + 
                 "\"")
+
+    def milightCommand(self, cmd):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
+        sock.sendto(cmd, ("192.168.121.35", 8899))
 
     def loadM3U(self):
         response = urlopen("http://iptviptv.do.am/_ld/0/1_IPTV.m3u")
@@ -74,15 +81,25 @@ class MyServer(BaseHTTPRequestHandler):
                 <head>
                     <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">
                     <script type="text/javascript">
+                        function sendReq(url) {
+                            var xhr = new XMLHttpRequest();
+                            xhr.open("POST", url, false);
+                            xhr.onload = function() {};
+                            xhr.send(); 
+                        }
+
                         window.onload = function() {
+                            document.getElementById('birghtness').addEventListener('input', 
+                                function(e) {
+                                    console.log('BRIGHT', e.srcElement.value);
+                                    sendReq("/light/brightness/" + e.srcElement.value);
+                                }, false);
+
                             Array.prototype.filter.call(document.getElementsByClassName('action'),
                                 function(el) {
                                     el.addEventListener("click",
                                         function() { 
-                                            var xhr = new XMLHttpRequest();
-                                            xhr.open("GET", el.dataset.url, false);
-                                            xhr.onload = function() {};
-                                            xhr.send(); 
+                                            sendReq(el.dataset.url);
                                         },
                                         false
                                     );
@@ -94,8 +111,14 @@ class MyServer(BaseHTTPRequestHandler):
             self.wfile.write("<body>".encode('utf-8'))
             self.wfile.write("""
                 <div>
+                    <button class='action' data-url='/tablet/onoff'  >    POWER    </button>
                     <button class='action' data-url='/tablet/volup'  >   + Vol +   </button>
                     <button class='action' data-url='/tablet/voldown'>   - Vol -   </button>
+                    <button class='action' data-url='/tablet/stop'   >     STOP    </button>
+                    <button class='action' data-url='/tablet/reboot' >    REBOOT   </button>
+                    <button class='action' data-url='/light/on     ' > LIGHT ON </button>
+                    <button class='action' data-url='/light/off    ' > LIGHT OFF </button>
+                    <input type="range" id="birghtness" name="birghtness" min="0" max="100" />
                 </div>""".encode('utf-8'))
 
             strr = ""
@@ -106,7 +129,7 @@ class MyServer(BaseHTTPRequestHandler):
             for ytb in self.youtubeChannels:
                 btns += "<button class='action' data-url='/tablet/play/" + str(ytb["index"]) + "'> Play (" + str(ind) + ") </button>"
                 if currName != ytb["name"] and currName != None:
-                    strr += "<div>" + currName + btns + "</div>"
+                    strr += "<div>" + currName + "&nbsp;" + btns + "</div>"
                     btns = ""
                     ind = 1
                 else:
@@ -119,66 +142,68 @@ class MyServer(BaseHTTPRequestHandler):
             self.wfile.write(strr.encode('utf-8'))
 
             self.wfile.write("</body>".encode('utf-8'))
-        elif pathList[0] == "init":
+        else:
+            self.writeResult("UNKNOWN CMD {}".format(self.path))
+
+    def do_POST(self):
+        pathList = list(filter(None, self.path.split("/")))
+        if pathList[0] == "init":
             self.loadM3U()
             self.send_response(200)
-        elif pathList[0] == "events":
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-
-            self.wfile.write("[{ \"name\": \"ddd\" }]".encode('utf-8'))
         elif pathList[0] == "tablet" and pathList[1] == "play":
-            self._set_response()
-            self.send_header('Content-type', 'application/json')
             if (len(pathList) > 2):
                 self.youtubeChannel = int(pathList[2])
             self.playCurrent()
-            self.wfile.write("{ \"result\": \"OK\"}".encode('utf-8'))
+            self.writeResult("OK")
         elif pathList == list(["tablet", "stop"]):
-            self._set_response()
-            self.send_header('Content-type', 'application/json')
             self.youtubeChannel = self.youtubeChannel + 1
             self.stopCurrent()
-            self.wfile.write("{ \"result\": \"OK\"}".encode('utf-8'))
+            self.writeResult("OK")
         elif pathList == list(["tablet", "playnext"]):
-            self._set_response()
-            self.send_header('Content-type', 'application/json')
             self.youtubeChannel = self.youtubeChannel + 1
             self.playCurrent()
-            self.wfile.write("{ \"result\": \"OK\"}".encode('utf-8'))
+            self.writeResult("OK")
         elif pathList == list(["tablet", "playprev"]):
-            self._set_response()
             self.youtubeChannel = self.youtubeChannel - 1
             self.playCurrent()
-            self.send_header('Content-type', 'application/json')
-            self.wfile.write("{ \"result\": \"OK\"}".encode('utf-8'))
+            self.writeResult("OK")
         elif pathList == list(["tablet", "volup"]):
-            self._set_response()
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
-            self.send_header('Content-type', 'application/json')
-            self.wfile.write("{ \"result\": \"OK\"}".encode('utf-8'))
+            self.writeResult("OK")
         elif pathList == list(["tablet", "voldown"]):
-            self._set_response()
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
-            self.send_header('Content-type', 'application/json')
-            self.wfile.write("{ \"result\": \"OK\"}".encode('utf-8'))
-        else:
-            self._set_response()
-            self.wfile.write("GET request for {}".format(self.path).encode('utf-8'))
+            self.writeResult("OK")
+        elif pathList == list(["tablet", "onoff"]):
+            self.adbShellCommand("input keyevent KEYCODE_POWER")
+            self.writeResult("OK")
+        elif pathList == list(["tablet", "reboot"]):
+            self.adbShellCommand("reboot")
+            self.writeResult("OK")
+        elif pathList == list(["light", "on"]):
+            self.milightCommand(b'\xc2\x00\x55') # all white
+            self.writeResult("OK")
+        elif pathList[0] == "light" and pathList[1] == "brightness":
+            # passed brightness is in format 0..100
+            ba = bytearray(b'\x4E\x00\x55')
+            ba[1] = int(0x2 + (0x15 * int(pathList[2]) / 100))
+            self.milightCommand(bytes(ba)) # 
+            self.writeResult("OK")
+        elif pathList == list(["light", "low"]):
+            self.milightCommand(b'\x45\x02\x55')
+            self.writeResult("OK")
+        elif pathList == list(["light", "off"]):
+            self.milightCommand(b'\x46\x00\x55')
+            self.writeResult("OK")
+        
+        
+class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
+    pass
 
-    def do_POST(self):
-        content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
-        post_data = self.rfile.read(content_length) # <--- Gets the data itself
-        logging.info("POST request,\nPath: %s\nHeaders:\n%s\n\nBody:\n%s\n",
-                str(self.path), str(self.headers), post_data.decode('utf-8'))
 
-        self._set_response()
-        self.wfile.write("POST request for {}".format(self.path).encode('utf-8'))
-
-def run(server_class=HTTPServer, handler_class=MyServer, port=8000):
+def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8000):
     logging.basicConfig(level=logging.INFO)
     server_address = ('', port)
+
     httpd = server_class(server_address, handler_class)
     logging.info('Starting httpd...\n')
     try:
