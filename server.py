@@ -10,8 +10,26 @@ import subprocess
 import re
 import os
 import socket
+import time
+
 from urllib.request import urlopen
 from socketserver import ThreadingMixIn
+from threading import Thread
+
+def timeToSleepNever():
+    return time.time() + 100*365*24*60*60  
+
+class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
+    pass
+
+    sleepAt = timeToSleepNever() # Sleep tablet at that time
+
+    def adbShellCommand(self, command):
+        resultStr = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read()
+        if len(resultStr) > 0:
+            subprocess.Popen("adb connect 192.168.121.166:5556", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
+            # And try again
+            subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
 
 class HomeHTTPHandler(BaseHTTPRequestHandler):
     youtubeChannel = 0
@@ -24,11 +42,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
 
     def adbShellCommand(self, command):
-        resultStr = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read()
-        if len(resultStr) > 0:
-            subprocess.Popen("adb connect 192.168.121.166:5556", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
-            # And try again
-            subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
+        self.server.adbShellCommand(command)
 
     def stopCurrent(self):
         self.adbShellCommand("killall org.videolan.vlc")
@@ -136,6 +150,10 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         elif pathList == list(["tablet", "reboot"]):
             self.adbShellCommand("reboot")
             self.writeResult("OK")
+        elif pathList[0] == "tablet" and pathList[1] == "sleepin":
+            self.server.sleepAt = time.time() + int(pathList[2])
+            
+            self.writeResult("OK")
         elif pathList == list(["light", "on"]):
             self.milightCommand(b'\xc2\x00\x55') # all white
             self.writeResult("OK")
@@ -151,17 +169,23 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         elif pathList == list(["light", "off"]):
             self.milightCommand(b'\x46\x00\x55')
             self.writeResult("OK")
-        
-        
-class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
-    pass
-
 
 def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8000):
     logging.basicConfig(level=logging.INFO)
     server_address = ('', port)
 
     httpd = server_class(server_address, handler_class)
+
+    def loop():
+        while True: 
+            time.sleep(15)
+            # Let's check sleeping
+            if httpd.sleepAt < time.time():
+                httpd.adbShellCommand("input keyevent KEYCODE_POWER")
+                sleepAt = self.timeToSleepNever()
+
+    Thread(target=loop).start()  
+
     logging.info('Starting httpd...\n')
     try:
         httpd.serve_forever()
