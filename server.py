@@ -12,6 +12,8 @@ import os
 import socket
 import time
 
+
+from  urllib.parse import quote_plus
 from urllib.request import urlopen
 from socketserver import ThreadingMixIn
 from threading import Thread
@@ -40,6 +42,9 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'application/json;charset=utf-8')
         self.end_headers()
         self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
+
+    def reportText(self, text):
+        urlopen("http://192.168.121.75/show?text="+quote_plus(text)).read()
 
     def adbShellCommand(self, command):
         self.server.adbShellCommand(command)
@@ -122,8 +127,14 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.loadM3U()
             self.send_response(200)
         elif pathList[0] == "tablet" and pathList[1] == "play":
+            if len(self.youtubeChannels) == 0:
+                self.loadM3U()
+
             if (len(pathList) > 2):
                 self.youtubeChannel = int(pathList[2])
+                ytb = self.youtubeChannels[self.youtubeChannel]
+                self.reportText("Going to play: " + ytb["name"] + "........")
+                
             self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "stop"]):
@@ -139,9 +150,11 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "volup"]):
+            self.reportText("Volume Up!")
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
             self.writeResult("OK")
         elif pathList == list(["tablet", "voldown"]):
+            self.reportText("Volume Down!")
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
             self.writeResult("OK")
         elif pathList == list(["tablet", "onoff"]):
