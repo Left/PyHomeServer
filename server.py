@@ -18,8 +18,21 @@ from urllib.request import urlopen
 from socketserver import ThreadingMixIn
 from threading import Thread
 
+def nameForCompare(st):
+    return st.lower()\
+        .replace("_", " ")\
+        .replace("-", " ")\
+        .replace("vk.com/iptv_iptv", "")\
+        .replace("(vk.com/iptv_iptv)", "")\
+        .replace("TV", "")\
+        .replace(" ", "")\
+        .strip()
+
 def timeToSleepNever():
     return time.time() + 100*365*24*60*60  
+
+def reportText(text):
+    urlopen("http://192.168.121.75/show?text="+quote_plus(text)).read()
 
 class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     pass
@@ -43,9 +56,6 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
 
-    def reportText(self, text):
-        urlopen("http://192.168.121.75/show?text="+quote_plus(text)).read()
-
     def adbShellCommand(self, command):
         self.server.adbShellCommand(command)
 
@@ -66,20 +76,28 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
 
     def loadM3U(self):
         response = urlopen("http://iptviptv.do.am/_ld/0/1_IPTV.m3u")
+        # response = urlopen("http://getsapp.ru/IPTV/Auto_IPTV.m3u")
         html = response.read().decode("utf-8")
         name = ""
         url = ""
 
         self.youtubeChannels = []
-        for line in html.split("\r\n"):
+        for line in html.splitlines():
             if line.startswith("#EXTINF"):
                 name = re.search('#EXTINF:-?\d*\,(.*)', line).group(1).strip()
             elif line.startswith("http"):
                 url = line
-                self.youtubeChannels.append({ "name": name, "url": url })
+                lowName = name.strip().lower()
+                if not "erotic" in lowName\
+                    and not "xxx" in lowName\
+                    and not "olala" in lowName\
+                    and not "o-la-la" in lowName\
+                    and not "erox tv" in lowName\
+                    and not "playboy" in lowName:
+                    self.youtubeChannels.append({ "name": name, "url": url })
                 name = ""
        
-        self.youtubeChannels.sort(key=lambda r:r["name"])
+        self.youtubeChannels.sort(key=lambda r:nameForCompare(r["name"]))
         ind = 0
         for ch in self.youtubeChannels:
             ch["index"] = ind
@@ -106,7 +124,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             btns = ""
 
             for ytb in self.youtubeChannels:
-                if currName != ytb["name"] and currName != None:
+                if currName != None and nameForCompare(currName) != nameForCompare(ytb["name"]):
                     strr += "<div class='channel-line'>" + currName + "&nbsp;" + btns + "</div>" + "\n"
                     btns = ""
                 btns += "<button class='action' data-url='/tablet/play/" + str(ytb["index"]) + "'  data-uri='" + ytb["url"] + "' data-name='" + ytb["name"] + "'> Play </button>" + "\n"
@@ -133,13 +151,17 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             if (len(pathList) > 2):
                 self.youtubeChannel = int(pathList[2])
                 ytb = self.youtubeChannels[self.youtubeChannel]
-                self.reportText("Включаем " + ytb["name"] + "........")
+                reportText("Включаем " + ytb["name"] + "........")
                 
             self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "stop"]):
             self.youtubeChannel = self.youtubeChannel + 1
             self.stopCurrent()
+            self.writeResult("OK")
+        elif pathList == list(["tablet", "playagain"]):
+            self.stopCurrent()
+            self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "playnext"]):
             self.youtubeChannel = self.youtubeChannel + 1
@@ -150,11 +172,11 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "volup"]):
-            self.reportText("Делаем громче")
+            reportText("Громче")
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
             self.writeResult("OK")
         elif pathList == list(["tablet", "voldown"]):
-            self.reportText("Делаем тише")
+            reportText("Тише")
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
             self.writeResult("OK")
         elif pathList == list(["tablet", "onoff"]):
@@ -168,11 +190,11 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             
             self.writeResult("OK")
         elif pathList == list(["light", "on"]):
-            self.reportText("Включаем свет")
+            reportText("Включаем свет")
             self.milightCommand(b'\xc2\x00\x55') # all white
             self.writeResult("OK")
         elif pathList[0] == "light" and pathList[1] == "brightness":
-            self.reportText("Яркость " + pathList[2] + "%")
+            reportText("Яркость " + pathList[2] + "%")
             # passed brightness is in format 0..100
             ba = bytearray(b'\x4E\x00\x55')
             ba[1] = int(0x2 + (0x15 * int(pathList[2]) / 100))
@@ -182,7 +204,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.milightCommand(b'\x45\x02\x55')
             self.writeResult("OK")
         elif pathList == list(["light", "off"]):
-            self.reportText("Выключаем свет")
+            reportText("Выключаем свет")
             self.milightCommand(b'\x46\x00\x55')
             self.writeResult("OK")
 
@@ -195,6 +217,9 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
     def loop():
         while True: 
             time.sleep(15)
+            minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
+            if minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0:
+                reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут")
             # Let's check sleeping
             if httpd.sleepAt < time.time():
                 httpd.adbShellCommand("input keyevent KEYCODE_POWER")
