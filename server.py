@@ -133,7 +133,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             if (len(pathList) > 2):
                 self.youtubeChannel = int(pathList[2])
                 ytb = self.youtubeChannels[self.youtubeChannel]
-                self.reportText("Going to play: " + ytb["name"] + "........")
+                self.reportText("Включаем " + ytb["name"] + "........")
                 
             self.playCurrent()
             self.writeResult("OK")
@@ -150,11 +150,11 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "volup"]):
-            self.reportText("Volume Up!")
+            self.reportText("Делаем громче")
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
             self.writeResult("OK")
         elif pathList == list(["tablet", "voldown"]):
-            self.reportText("Volume Down!")
+            self.reportText("Делаем тише")
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
             self.writeResult("OK")
         elif pathList == list(["tablet", "onoff"]):
@@ -168,9 +168,11 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             
             self.writeResult("OK")
         elif pathList == list(["light", "on"]):
+            self.reportText("Включаем свет")
             self.milightCommand(b'\xc2\x00\x55') # all white
             self.writeResult("OK")
         elif pathList[0] == "light" and pathList[1] == "brightness":
+            self.reportText("Яркость " + pathList[2] + "%")
             # passed brightness is in format 0..100
             ba = bytearray(b'\x4E\x00\x55')
             ba[1] = int(0x2 + (0x15 * int(pathList[2]) / 100))
@@ -180,6 +182,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.milightCommand(b'\x45\x02\x55')
             self.writeResult("OK")
         elif pathList == list(["light", "off"]):
+            self.reportText("Выключаем свет")
             self.milightCommand(b'\x46\x00\x55')
             self.writeResult("OK")
 
