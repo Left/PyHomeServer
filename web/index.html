@@ -5,7 +5,7 @@
     <script type="text/javascript">
         function sendReq(url) {
             var xhr = new XMLHttpRequest();
-            xhr.open("POST", url, false);
+            xhr.open("POST", url, true);
             xhr.onload = function() {};
             xhr.send(); 
         }
@@ -57,7 +57,7 @@
 <body>
     <div class="header">
             <div>
-                <button class='action' data-url='/tablet/onoff'    >    POWER    </button>
+                <button class='action' data-url='/tablet/onoff'    >  ( POWER )  </button>
                 <button class='action' data-url='/tablet/volup'    >   + Vol +   </button>
                 <button class='action' data-url='/tablet/voldown'  >   - Vol -   </button>
                 <button class='action' data-url='/tablet/stop'     >     STOP    </button>
@@ -66,9 +66,11 @@
             </div>
             <hr/>
             <div>
+                <button class='action' data-url='/tablet/sleepin/10'   >    SLEEP in 10sec   </button>
                 <button class='action' data-url='/tablet/sleepin/600'  >    SLEEP in 10min   </button>
                 <button class='action' data-url='/tablet/sleepin/1800' >    SLEEP in 30min   </button>
                 <button class='action' data-url='/tablet/sleepin/3600' >     SLEEP in 1h     </button>
+                <button class='action' data-url='/tablet/sleepin/7200' >     SLEEP in 2h     </button>
             </div>
             <hr/>
             <div>

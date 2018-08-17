@@ -1,4 +1,5 @@
 #!/opt/bin/python3
+# -*- coding: utf-8 -*-
 """
 Very simple HTTP server in python to control Android tablet through ADB
 Usage::
@@ -11,9 +12,11 @@ import re
 import os
 import socket
 import time
+import json
+import hashlib
+import struct
 
-
-from  urllib.parse import quote_plus
+from urllib.parse import quote_plus
 from urllib.request import urlopen
 from socketserver import ThreadingMixIn
 from threading import Thread
@@ -32,12 +35,25 @@ def timeToSleepNever():
     return time.time() + 100*365*24*60*60  
 
 def reportText(text):
-    urlopen("http://192.168.121.75/show?text="+quote_plus(text)).read()
+    def open_website(url):
+        return urlopen(url)
+
+
+    Thread(target=open_website, args=["http://192.168.121.75/show?text="+quote_plus(text)]).start()
 
 class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     pass
 
+    loadedChannelsAt = 0
+    youtubeChannel = 0
+    youtubeChannels = []
+    youtubeChannelsByIds = {}
+
     sleepAt = timeToSleepNever() # Sleep tablet at that time
+
+    def __init__(self, *args):
+        HTTPServer.__init__(self, *args)
+        self.loadM3U()
 
     def adbShellCommand(self, command):
         resultStr = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read()
@@ -46,35 +62,15 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             # And try again
             subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
 
-class HomeHTTPHandler(BaseHTTPRequestHandler):
-    youtubeChannel = 0
-    youtubeChannels = []
-
-    def writeResult(self, res):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json;charset=utf-8')
-        self.end_headers()
-        self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
-
-    def adbShellCommand(self, command):
-        self.server.adbShellCommand(command)
-
-    def stopCurrent(self):
-        self.adbShellCommand("killall org.videolan.vlc")
-
-    def playCurrent(self):
-        self.stopCurrent()
-        if len(self.youtubeChannels) == 0:
-            self.loadM3U()       
-        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -d \"" + 
-                self.youtubeChannels[self.youtubeChannel]["url"] + 
-                "\"")
-
-    def milightCommand(self, cmd):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
-        sock.sendto(cmd, ("192.168.121.35", 8899))
+    def loadM3UIfNeeded(self):
+        if (time.time() - self.loadedChannelsAt) > 3600:
+            # logging.info("Last load at " + str(time.time() - self.loadedChannelsAt))
+            # we load channels each hour or on start
+            self.loadM3U()
 
     def loadM3U(self):
+        logging.info("LOADING CHANNELS\n")
+
         response = urlopen("http://iptviptv.do.am/_ld/0/1_IPTV.m3u")
         # response = urlopen("http://getsapp.ru/IPTV/Auto_IPTV.m3u")
         html = response.read().decode("utf-8")
@@ -98,18 +94,50 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                 name = ""
        
         self.youtubeChannels.sort(key=lambda r:nameForCompare(r["name"]))
-        ind = 0
         for ch in self.youtubeChannels:
-            ch["index"] = ind
-            ind = ind + 1
+            urlHash = bytes(hashlib.sha256(ch["url"].encode('utf-8')).digest())
+            #logging.info(str(urlHash))
+            ch["id"] = struct.unpack("<I", urlHash[0:4])[0] % 10000000
+            if ch["id"] in self.youtubeChannelsByIds and self.youtubeChannelsByIds[ch["id"]]["url"] != ch["url"]:
+                logging.error("HASH CLASH: " + str(ch["id"]) + " " + ch["url"] + " " + self.youtubeChannelsByIds[ch["id"]]["url"]) 
+            else:
+                self.youtubeChannelsByIds[ch["id"]] = ch
+
+        with open(os.path.dirname(os.path.abspath(__file__)) + "channels.json", "w") as write_file:
+            json.dumps(self.youtubeChannels, write_file)
+
+        self.loadedChannelsAt = time.time()
+        logging.info("LOADED CHANNELS\n")
+
+class HomeHTTPHandler(BaseHTTPRequestHandler):
+    def writeResult(self, res):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json;charset=utf-8')
+        self.end_headers()
+        self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
+
+    def adbShellCommand(self, command):
+        self.server.adbShellCommand(command)
+
+    def stopCurrent(self):
+        self.adbShellCommand("am force-stop org.videolan.vlc")
+
+    def playCurrent(self):
+        self.stopCurrent()
+        logging.info(self.server.youtubeChannelsByIds[self.server.youtubeChannel]["url"])
+        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -d \"" + 
+                self.server.youtubeChannelsByIds[self.server.youtubeChannel]["url"] + 
+                "\"")
+
+    def milightCommand(self, cmd):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
+        sock.sendto(cmd, ("192.168.121.35", 8899))
  
     def do_GET(self):
-        logging.info("GET request,\nPath: %s\n\n", str(self.path))
+        logging.info("GET request,\nPath: %s", str(self.path))
         pathList = list(filter(None, self.path.split("/")))
         
         if len(pathList) == 0:
-            self.loadM3U()
-
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
@@ -123,11 +151,14 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             currName = None
             btns = ""
 
-            for ytb in self.youtubeChannels:
+            for ytb in self.server.youtubeChannels:
                 if currName != None and nameForCompare(currName) != nameForCompare(ytb["name"]):
                     strr += "<div class='channel-line'>" + currName + "&nbsp;" + btns + "</div>" + "\n"
                     btns = ""
-                btns += "<button class='action' data-url='/tablet/play/" + str(ytb["index"]) + "'  data-uri='" + ytb["url"] + "' data-name='" + ytb["name"] + "'> Play </button>" + "\n"
+                btns += "<button class='action' data-url='/tablet/play/" \
+                    + str(ytb["id"]) + "'  data-uri='"\
+                    + ytb["url"] + "' data-name='" + ytb["name"] + "'> "\
+                    + str(ytb["id"]) +" </button>" + "\n"
                 currName = ytb["name"]
 
             if len(btns) > 0:
@@ -136,39 +167,33 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             htmlContent = htmlContent.replace("<!--{{{channels}}}-->", strr)
 
             self.wfile.write(htmlContent.encode('utf-8'))
+        elif pathList == list(["favicon.ico"]):
+            self.send_response(200)
+            self.send_header('Content-type', 'image/x-ico')
+            self.end_headers()
+
+            with open(os.path.dirname(os.path.abspath(__file__)) + '/web/favicon.ico', 'rb') as myfile:
+                self.wfile.write(myfile.read())
         else:
             self.writeResult("UNKNOWN CMD {}".format(self.path))
 
     def do_POST(self):
         pathList = list(filter(None, self.path.split("/")))
         if pathList[0] == "init":
-            self.loadM3U()
             self.send_response(200)
         elif pathList[0] == "tablet" and pathList[1] == "play":
-            if len(self.youtubeChannels) == 0:
-                self.loadM3U()
-
             if (len(pathList) > 2):
-                self.youtubeChannel = int(pathList[2])
-                ytb = self.youtubeChannels[self.youtubeChannel]
-                reportText("Включаем " + ytb["name"] + "........")
+                self.server.youtubeChannel = int(pathList[2])
+                ytb = self.server.youtubeChannelsByIds[self.server.youtubeChannel]
+                reportText("Включаем " + ytb["name"])
                 
             self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "stop"]):
-            self.youtubeChannel = self.youtubeChannel + 1
             self.stopCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "playagain"]):
             self.stopCurrent()
-            self.playCurrent()
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "playnext"]):
-            self.youtubeChannel = self.youtubeChannel + 1
-            self.playCurrent()
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "playprev"]):
-            self.youtubeChannel = self.youtubeChannel - 1
             self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "volup"]):
@@ -187,7 +212,11 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] == "sleepin":
             self.server.sleepAt = time.time() + int(pathList[2])
-            
+
+            minsToSwitchOff = int((self.server.sleepAt - time.time())/60)
+            secsToSwitchOff = int((self.server.sleepAt - time.time())%60)
+            reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут " + str(secsToSwitchOff) + " секунд")
+
             self.writeResult("OK")
         elif pathList == list(["light", "on"]):
             reportText("Включаем свет")
@@ -216,7 +245,10 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
 
     def loop():
         while True: 
-            time.sleep(15)
+            time.sleep(5)
+            
+            httpd.loadM3UIfNeeded()
+
             minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
             if minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0:
                 reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут")
