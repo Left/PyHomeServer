@@ -2,6 +2,10 @@
 <html>
 <head>
     <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <meta 
+        name='viewport' 
+        content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0' 
+    />
     <script type="text/javascript">
         function sendReq(url) {
             var xhr = new XMLHttpRequest();
@@ -27,6 +31,20 @@
                     );
                 }
             );
+
+            var categEl = document.getElementById('categories');
+            var updateCategory = () => {
+                var category = categEl.selectedOptions[0].value;
+                Array.prototype.filter.call(document.getElementsByClassName('channel-line'),
+                    function(el) {
+                        el.style.display = el.dataset.cat === category ? "block" : "none";
+                    }, false);
+            }
+            categEl.addEventListener("change", (ev) => { 
+                updateCategory();
+            }, false);
+            updateCategory();
+
         }
     </script>
     <style>
@@ -36,17 +54,23 @@
             margin: 0;
         }
 
-        .header {
-            position: fixed;
-            background: white;
+        body table {
+            position: absolute;
             top: 0;
-            padding: 1em;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 100%; 
             width: 100%
         }
 
+        .header {
+            padding: 1em;
+        }
+
         .channels {
-            padding-top: 100px;
             margin: .5em;
+            overflow: scroll;
         }
 
         .channel-line {
@@ -55,14 +79,17 @@
     </style>
 </head>
 <body>
-    <div class="header">
+    <table>
+        <tr><td class="header">
             <div>
                 <button class='action' data-url='/tablet/onoff'    >  ( POWER )  </button>
                 <button class='action' data-url='/tablet/volup'    >   + Vol +   </button>
                 <button class='action' data-url='/tablet/voldown'  >   - Vol -   </button>
                 <button class='action' data-url='/tablet/stop'     >     STOP    </button>
+                <button class='action' data-url='/tablet/russia24' >  RUSSIA 24  </button>
                 <button class='action' data-url='/tablet/playagain'> PLAY AGAIN  </button>
                 <button class='action' data-url='/tablet/reboot'   >    REBOOT   </button>
+                <button class='action' data-url='/self/reboot'     > SELF REBOOT </button>
             </div>
             <hr/>
             <div>
@@ -73,15 +100,21 @@
                 <button class='action' data-url='/tablet/sleepin/7200' >     SLEEP in 2h     </button>
             </div>
             <hr/>
+            <select id='categories'>
+                    <!--{{{categories}}}-->
+            </select>
+            <hr/>
             <div>
                 <button class='action' data-url='/light/on     ' > LIGHT ON </button>
                 <button class='action' data-url='/light/off    ' > LIGHT OFF </button>
                 <input type="range" id="birghtness" name="birghtness" min="0" max="100" />
             </div>
-        </div>
-    <div class='channels'>
-        <!--{{{channels}}}-->
-    </div>
+            <hr/>
+        </td></tr>
+        <tr><td class='channels'>
+            <!--{{{channels}}}-->               
+        </td></tr>
+    </table>
 
 </body>
 

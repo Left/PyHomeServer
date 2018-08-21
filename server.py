@@ -22,7 +22,7 @@ from socketserver import ThreadingMixIn
 from threading import Thread
 
 def nameForCompare(st):
-    return st.lower()\
+    return st["cat"].lower() + st["name"].lower()\
         .replace("_", " ")\
         .replace("-", " ")\
         .replace("vk.com/iptv_iptv", "")\
@@ -63,51 +63,65 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
 
     def loadM3UIfNeeded(self):
-        if (time.time() - self.loadedChannelsAt) > 3600:
+        if len(self.youtubeChannels) == 0 or (time.time() - self.loadedChannelsAt) > 3600:
             # logging.info("Last load at " + str(time.time() - self.loadedChannelsAt))
             # we load channels each hour or on start
             self.loadM3U()
 
     def loadM3U(self):
-        logging.info("LOADING CHANNELS\n")
+        try:
+            logging.info("LOADING CHANNELS\n")
 
-        response = urlopen("http://iptviptv.do.am/_ld/0/1_IPTV.m3u")
-        # response = urlopen("http://getsapp.ru/IPTV/Auto_IPTV.m3u")
-        html = response.read().decode("utf-8")
-        name = ""
-        url = ""
+            '''
+            response = urlopen("http://iptviptv.do.am/_ld/0/1_IPTV.m3u")
+            # response = urlopen("http://getsapp.ru/IPTV/Auto_IPTV.m3u")
+            html = response.read().decode("utf-8")
+            name = ""
+            url = ""
 
-        self.youtubeChannels = []
-        for line in html.splitlines():
-            if line.startswith("#EXTINF"):
-                name = re.search('#EXTINF:-?\d*\,(.*)', line).group(1).strip()
-            elif line.startswith("http"):
-                url = line
-                lowName = name.strip().lower()
-                if not "erotic" in lowName\
-                    and not "xxx" in lowName\
-                    and not "olala" in lowName\
-                    and not "o-la-la" in lowName\
-                    and not "erox tv" in lowName\
-                    and not "playboy" in lowName:
+            self.youtubeChannels = []
+            for line in html.splitlines():
+                if line.startswith("#EXTINF"):
+                    name = re.search('#EXTINF:-?\d*\,(.*)', line).group(1).strip()
+                elif line.startswith("http"):
+                    url = line
+                    lowName = name.strip().lower()
+                    if not "erotic" in lowName\
+                        and not "xxx" in lowName\
+                        and not "olala" in lowName\
+                        and not "o-la-la" in lowName\
+                        and not "erox tv" in lowName\
+                        and not "playboy" in lowName:
                     self.youtubeChannels.append({ "name": name, "url": url })
-                name = ""
-       
-        self.youtubeChannels.sort(key=lambda r:nameForCompare(r["name"]))
-        for ch in self.youtubeChannels:
-            urlHash = bytes(hashlib.sha256(ch["url"].encode('utf-8')).digest())
-            #logging.info(str(urlHash))
-            ch["id"] = struct.unpack("<I", urlHash[0:4])[0] % 10000000
-            if ch["id"] in self.youtubeChannelsByIds and self.youtubeChannelsByIds[ch["id"]]["url"] != ch["url"]:
-                logging.error("HASH CLASH: " + str(ch["id"]) + " " + ch["url"] + " " + self.youtubeChannelsByIds[ch["id"]]["url"]) 
-            else:
-                self.youtubeChannelsByIds[ch["id"]] = ch
+                    name = ""
+            '''
 
-        with open(os.path.dirname(os.path.abspath(__file__)) + "channels.json", "w") as write_file:
-            json.dumps(self.youtubeChannels, write_file)
+            response = urlopen("http://acetv.org/js/data.json?0.26020398076972606").read().decode("utf-8")
+            # logging.info(response)
+            channels = json.loads(response)
+            
+            self.youtubeChannels = []
 
-        self.loadedChannelsAt = time.time()
-        logging.info("LOADED CHANNELS\n")
+            for ch in channels["channels"]:
+                self.youtubeChannels.append({ "name": ch["name"], "url": "http://192.168.121.38:8000/pid/" + ch["url"] + "/stream.mp4", "cat": ch["cat"] })
+
+            self.youtubeChannels.sort(key=lambda r:nameForCompare(r))
+            for ch in self.youtubeChannels:
+                urlHash = bytes(hashlib.sha256(ch["url"].encode('utf-8')).digest())
+                #logging.info(str(urlHash))
+                ch["id"] = struct.unpack("<I", urlHash[0:4])[0] % 1000000
+                if ch["id"] in self.youtubeChannelsByIds and self.youtubeChannelsByIds[ch["id"]]["url"] != ch["url"]:
+                    logging.error("HASH CLASH: " + str(ch["id"]) + " " + ch["url"] + " " + self.youtubeChannelsByIds[ch["id"]]["url"]) 
+                else:
+                    self.youtubeChannelsByIds[ch["id"]] = ch
+
+            with open(os.path.dirname(os.path.abspath(__file__)) + "channels.json", "w") as write_file:
+                json.dumps(self.youtubeChannels, write_file)
+
+            self.loadedChannelsAt = time.time()
+            logging.info("LOADED CHANNELS")
+        except Exception as e:
+            logging.info("FAILED TO LOAD CHANNELS:" + str(e))
 
 class HomeHTTPHandler(BaseHTTPRequestHandler):
     def writeResult(self, res):
@@ -151,19 +165,26 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             currName = None
             btns = ""
 
+            cats = set()
+
             for ytb in self.server.youtubeChannels:
-                if currName != None and nameForCompare(currName) != nameForCompare(ytb["name"]):
-                    strr += "<div class='channel-line'>" + currName + "&nbsp;" + btns + "</div>" + "\n"
+                cats.add(ytb["cat"])
+                if currName != None and nameForCompare(currName) != nameForCompare(ytb):
+                    strr += "<div class='channel-line' data-cat='" + currName["cat"] + "'>" + currName["name"] + "&nbsp;" + btns + "</div>" + "\n"
                     btns = ""
                 btns += "<button class='action' data-url='/tablet/play/" \
                     + str(ytb["id"]) + "'  data-uri='"\
                     + ytb["url"] + "' data-name='" + ytb["name"] + "'> "\
                     + str(ytb["id"]) +" </button>" + "\n"
-                currName = ytb["name"]
+                currName = ytb
 
             if len(btns) > 0:
-                strr += "<div class='channel-line'>" + currName + "&nbsp;" + btns + "</div>" + "\n"
+                strr += "<div class='channel-line'>" + currName["name"] + "&nbsp;" + btns + "</div>" + "\n"
 
+            # Categories
+            htmlContent = htmlContent.replace("<!--{{{categories}}}-->",\
+                " ".join(sorted(map(lambda c : "\t<option value='" + c + "'>" + c + "</option>\n", cats))))
+            # Channels
             htmlContent = htmlContent.replace("<!--{{{channels}}}-->", strr)
 
             self.wfile.write(htmlContent.encode('utf-8'))
@@ -207,8 +228,14 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         elif pathList == list(["tablet", "onoff"]):
             self.adbShellCommand("input keyevent KEYCODE_POWER")
             self.writeResult("OK")
+        elif pathList == list(["tablet", "russia24"]):
+            self.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=K59KKnIbIaM\" --ez force_fullscreen true")
+            self.writeResult("OK")
         elif pathList == list(["tablet", "reboot"]):
             self.adbShellCommand("reboot")
+            self.writeResult("OK")
+        elif pathList == list(["self", "reboot"]):
+            subprocess.Popen("reboot", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read() # Reboot self
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] == "sleepin":
             self.server.sleepAt = time.time() + int(pathList[2])
@@ -237,25 +264,31 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.milightCommand(b'\x46\x00\x55')
             self.writeResult("OK")
 
-def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8000):
+def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8080):
     logging.basicConfig(level=logging.INFO)
     server_address = ('', port)
 
     httpd = server_class(server_address, handler_class)
 
     def loop():
+        timeToSleepWasReported = False
         while True: 
             time.sleep(5)
             
             httpd.loadM3UIfNeeded()
 
             minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
-            if minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0:
-                reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут")
+            if (minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0):
+                if not timeToSleepWasReported:
+                    reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут")
+                    timeToSleepWasReported = True
+            else:
+                timeToSleepWasReported = False
+                
             # Let's check sleeping
             if httpd.sleepAt < time.time():
                 httpd.adbShellCommand("input keyevent KEYCODE_POWER")
-                sleepAt = self.timeToSleepNever()
+                sleepAt = httpd.timeToSleepNever()
 
     Thread(target=loop).start()  
 
