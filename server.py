@@ -45,7 +45,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     pass
 
     loadedChannelsAt = 0
-    youtubeChannel = 0
+    youtubeChannel = ""
     youtubeChannels = []
     youtubeChannelsByIds = {}
 
@@ -111,8 +111,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             self.youtubeChannels.sort(key=lambda r:nameForCompare(r))
             for ch in self.youtubeChannels:
                 urlHash = bytes(hashlib.sha256(ch["url"].encode('utf-8')).digest())
-                #logging.info(str(urlHash))
-                ch["id"] = struct.unpack("<I", urlHash[0:4])[0] % 1000000
+                ch["id"] = urlHash.hex()
                 if ch["id"] in self.youtubeChannelsByIds and self.youtubeChannelsByIds[ch["id"]]["url"] != ch["url"]:
                     logging.error("HASH CLASH: " + str(ch["id"]) + " " + ch["url"] + " " + self.youtubeChannelsByIds[ch["id"]]["url"]) 
                 else:
@@ -176,9 +175,8 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                     strr += "<div class='channel-line' data-cat='" + currName["cat"] + "'>" + currName["name"] + "&nbsp;" + btns + "</div>" + "\n"
                     btns = ""
                 btns += "<button class='action' data-url='/tablet/play/" \
-                    + str(ytb["id"]) + "'  data-uri='"\
-                    + ytb["url"] + "' data-name='" + ytb["name"] + "'> "\
-                    + str(ytb["id"]) +" </button>" + "\n"
+                    + ytb["id"] + "'  data-uri='"\
+                    + ytb["url"] + "' data-name='" + ytb["name"] + "'>[    Play    ]</button>" + "\n"
                 currName = ytb
 
             if len(btns) > 0:
@@ -213,7 +211,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
         elif pathList[0] == "tablet" and pathList[1] == "play":
             if (len(pathList) > 2):
-                self.server.youtubeChannel = int(pathList[2])
+                self.server.youtubeChannel = pathList[2]
                 ytb = self.server.youtubeChannelsByIds[self.server.youtubeChannel]
                 reportText("Включаем " + ytb["name"])
                 
@@ -239,6 +237,12 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("OK")
         elif pathList == list(["tablet", "russia24"]):
             self.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=K59KKnIbIaM\" --ez force_fullscreen true")
+            self.writeResult("OK")
+        elif pathList == list(["tablet", "youtube", "stop"]):
+            self.adbShellCommand("am force-stop com.google.android.youtube")
+            self.writeResult("OK")
+        elif pathList[0] == "tablet" and pathList[1] ==  "youtube":
+            self.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=" + pathList[2] + "\" --ez force_fullscreen true")
             self.writeResult("OK")
         elif pathList == list(["tablet", "reboot"]):
             self.adbShellCommand("reboot")

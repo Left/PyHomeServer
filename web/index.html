@@ -21,6 +21,15 @@
                     sendReq("/light/brightness/" + e.srcElement.value);
                 }, false);
 
+            document.getElementById('playYoutube').addEventListener('click', 
+                function(e) {
+                    sendReq("/tablet/youtube/" + document.getElementById('youtubeChannelId').value);
+                }, false);
+            document.getElementById('stopYoutube').addEventListener('click', 
+                function(e) {
+                    sendReq("/tablet/youtube/stop");
+                }, false);
+
             Array.prototype.filter.call(document.getElementsByClassName('action'),
                 function(el) {
                     el.addEventListener("click",
@@ -86,11 +95,18 @@
                 <button class='action' data-url='/tablet/volup'    >   + Vol +   </button>
                 <button class='action' data-url='/tablet/voldown'  >   - Vol -   </button>
                 <button class='action' data-url='/tablet/stop'     >     STOP    </button>
-                <button class='action' data-url='/tablet/russia24' >  RUSSIA 24  </button>
                 <button class='action' data-url='/tablet/playagain'> PLAY AGAIN  </button>
                 <button class='action' data-url='/tablet/reboot'   >    REBOOT   </button>
                 <button class='action' data-url='/self/reboot'     > SELF REBOOT </button>
                 <a href="/tablet/screen" target="_new"> Screenshot </a>
+            </div>
+            <hr/>
+            <div>
+                <button class='action' data-url='/tablet/russia24' >  RUSSIA 24  </button>
+                <span> or </span>
+                <input id='youtubeChannelId' type="text" placeholder="Youtube ID"/>
+                <button id='playYoutube'>  Play  </button>
+                <button id='stopYoutube'>  Stop  </button>
             </div>
             <hr/>
             <div>
