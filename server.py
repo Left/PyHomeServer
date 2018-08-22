@@ -56,11 +56,14 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         self.loadM3U()
 
     def adbShellCommand(self, command):
-        resultStr = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read()
-        if len(resultStr) > 0:
+        process = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        resultOut, resultErr = process.communicate()
+        if len(resultErr) > 0:
             subprocess.Popen("adb connect 192.168.121.166:5556", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
             # And try again
-            subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.read()
+            process = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            resultOut, resultErr = process.communicate()
+        return resultOut
 
     def loadM3UIfNeeded(self):
         if len(self.youtubeChannels) == 0 or (time.time() - self.loadedChannelsAt) > 3600:
@@ -70,7 +73,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
     def loadM3U(self):
         try:
-            logging.info("LOADING CHANNELS\n")
+            logging.info("LOADING CHANNELS")
 
             '''
             response = urlopen("http://iptviptv.do.am/_ld/0/1_IPTV.m3u")
@@ -116,7 +119,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
                     self.youtubeChannelsByIds[ch["id"]] = ch
 
             with open(os.path.dirname(os.path.abspath(__file__)) + "channels.json", "w") as write_file:
-                json.dumps(self.youtubeChannels, write_file)
+                write_file.write(json.dumps(self.youtubeChannels))
 
             self.loadedChannelsAt = time.time()
             logging.info("LOADED CHANNELS")
@@ -131,7 +134,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
 
     def adbShellCommand(self, command):
-        self.server.adbShellCommand(command)
+        return self.server.adbShellCommand(command)
 
     def stopCurrent(self):
         self.adbShellCommand("am force-stop org.videolan.vlc")
@@ -195,6 +198,12 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
 
             with open(os.path.dirname(os.path.abspath(__file__)) + '/web/favicon.ico', 'rb') as myfile:
                 self.wfile.write(myfile.read())
+        elif pathList == list(["tablet", "screen"]):
+            self.send_response(200)
+            self.send_header('Content-type', 'image/bmp')
+            self.end_headers()
+
+            self.wfile.write(re.sub(b'\r\n', b'\n', self.adbShellCommand("screencap -p")))
         else:
             self.writeResult("UNKNOWN CMD {}".format(self.path))
 
@@ -278,7 +287,7 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
             httpd.loadM3UIfNeeded()
 
             minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
-            if (minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0):
+            if minsToSwitchOff < 1440 and (minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0):
                 if not timeToSleepWasReported:
                     reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут")
                     timeToSleepWasReported = True
