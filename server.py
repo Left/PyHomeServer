@@ -15,6 +15,8 @@ import time
 import json
 import hashlib
 import struct
+import base64
+import urllib
 
 from urllib.parse import quote_plus
 from urllib.request import urlopen
@@ -99,7 +101,8 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
                     name = ""
             '''
 
-            response = urlopen("http://acetv.org/js/data.json?0.26020398076972606").read().decode("utf-8")
+            # response = urlopen("http://acetv.org/js/data.json?0.26020398076972606").read().decode("utf-8")
+            response = urlopen("http://pomoyka.win/trash/ttv-list/as.json").read().decode("utf-8")
             # logging.info(response)
             channels = json.loads(response)
             
@@ -243,6 +246,13 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] ==  "youtube":
             self.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=" + pathList[2] + "\" --ez force_fullscreen true")
+            self.writeResult("OK")
+        elif pathList[0] == "tablet" and pathList[1] ==  "youtubeURL":
+            logging.info('Playing ' + urllib.parse.unquote(pathList[2]))
+            self.adbShellCommand("am start -a android.intent.action.VIEW -d \"" + urllib.parse.unquote(pathList[2])\
+                .replace("&", "\&")\
+                .replace("https:", "http:")\
+                + "\" --ez force_fullscreen true")
             self.writeResult("OK")
         elif pathList == list(["tablet", "reboot"]):
             self.adbShellCommand("reboot")

@@ -21,10 +21,26 @@
                     sendReq("/light/brightness/" + e.srcElement.value);
                 }, false);
 
+            playYoutube = () => {
+                var chanId = document.getElementById('youtubeChannelId');
+                var urlId = document.getElementById('youtubeChannelURL');
+                if (!!chanId.value && chanId.value !== "") {
+                    sendReq("/tablet/youtube/" + chanId.value);
+                } else {
+                    sendReq("/tablet/youtubeURL/" + encodeURIComponent(urlId.value));
+                }
+            }
+
             document.getElementById('playYoutube').addEventListener('click', 
                 function(e) {
-                    sendReq("/tablet/youtube/" + document.getElementById('youtubeChannelId').value);
+                    playYoutube();
                 }, false);
+            document.getElementById('youtubeChannelId').addEventListener('keypress',
+                function(e) {
+                    if (e.keyCode == 13) {
+                        playYoutube();
+                    }
+                }, false); 
             document.getElementById('stopYoutube').addEventListener('click', 
                 function(e) {
                     sendReq("/tablet/youtube/stop");
@@ -103,8 +119,10 @@
             <hr/>
             <div>
                 <button class='action' data-url='/tablet/russia24' >  RUSSIA 24  </button>
-                <span> or </span>
+                <span> or video: </span>
                 <input id='youtubeChannelId' type="text" placeholder="Youtube ID"/>
+                <span> or URL: </span>
+                <input id='youtubeChannelURL' type="text" placeholder="Youtube URL"/>
                 <button id='playYoutube'>  Play  </button>
                 <button id='stopYoutube'>  Stop  </button>
             </div>
