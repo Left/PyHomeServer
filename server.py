@@ -38,6 +38,8 @@ gMany = Gender("включены", "выключены")
 gThird = Gender("включено", "выключено")
 
 httpd = None
+pingig = 1
+allWs = []
 clockWs = []
 
 relays = {\
@@ -228,12 +230,15 @@ def webSocketLoop():
 
     def on_close(ws):
         clockWs.remove(ws)
+        allWs.remove(ws)
         print("### closed ###")
 
     ws = websocket.WebSocketApp("ws://192.168.121.75:8081/",
                             on_message = on_message,
                             on_error = on_error,
                             on_close = on_close)
+
+    allWs.append(ws)
     clockWs.append(ws)
 
     ws.run_forever()
@@ -248,12 +253,12 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
 
     def stopCurrent(self):
-        self.adbShellCommand("am force-stop org.videolan.vlc")
+        httpd.adbShellCommand("am force-stop org.videolan.vlc")
 
     def playCurrent(self):
         self.stopCurrent()
         logging.info(self.server.youtubeChannelsByIds[self.server.youtubeChannel]["url"])
-        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -d \"" + 
+        httpd.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -d \"" + 
                 self.server.youtubeChannelsByIds[self.server.youtubeChannel]["url"] + 
                 "\"")
 
@@ -313,7 +318,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'image/bmp')
             self.end_headers()
 
-            self.wfile.write(re.sub(b'\r\n', b'\n', self.adbShellCommand("screencap -p")))
+            self.wfile.write(re.sub(b'\r\n', b'\n', httpd.adbShellCommand("screencap -p")))
         else:
             self.writeResult("UNKNOWN CMD {}".format(self.path))
 
@@ -343,26 +348,26 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             httpd.volDown()
             self.writeResult("OK")
         elif pathList == list(["tablet", "onoff"]):
-            self.adbShellCommand("input keyevent KEYCODE_POWER")
+            httpd.adbShellCommand("input keyevent KEYCODE_POWER")
             self.writeResult("OK")
         elif pathList == list(["tablet", "russia24"]):
-            self.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=K59KKnIbIaM\" --ez force_fullscreen true")
+            httpd.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=K59KKnIbIaM\" --ez force_fullscreen true")
             self.writeResult("OK")
         elif pathList == list(["tablet", "youtube", "stop"]):
-            self.adbShellCommand("am force-stop com.google.android.youtube")
+            httpd.adbShellCommand("am force-stop com.google.android.youtube")
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] ==  "youtube":
-            self.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=" + pathList[2] + "\" --ez force_fullscreen true")
+            httpd.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=" + pathList[2] + "\" --ez force_fullscreen true")
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] ==  "youtubeURL":
             logging.info('Playing ' + urllib.parse.unquote(pathList[2]))
-            self.adbShellCommand("am start -a android.intent.action.VIEW -d \"" + urllib.parse.unquote(pathList[2])\
+            httpd.adbShellCommand("am start -a android.intent.action.VIEW -d \"" + urllib.parse.unquote(pathList[2])\
                 .replace("&", "\&")\
                 .replace("https:", "http:")\
                 + "\" --ez force_fullscreen true")
             self.writeResult("OK")
         elif pathList == list(["tablet", "reboot"]):
-            self.adbShellCommand("reboot")
+            httpd.adbShellCommand("reboot")
             self.writeResult("OK")
         elif pathList == list(["self", "reboot"]):
             subprocess.Popen("reboot", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read() # Reboot self
@@ -401,17 +406,22 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
     server_address = ('', port)
 
     global httpd
+    global pingig
     httpd = server_class(server_address, handler_class)
 
     def loop():
         timeToSleepWasReported = False
         while True: 
-            time.sleep(5)
+            time.sleep(3)
             
             httpd.loadM3UIfNeeded()
 
-            asyncHttpReq("http://192.168.121.112/")
-            asyncHttpReq("http://192.168.121.93/")
+            #asyncHttpReq("http://192.168.121.112/")
+            #asyncHttpReq("http://192.168.121.93/")
+
+            #for ws in allWs:
+            #    pingig = pingig + 1
+            #    ws.send("{ \"type\": \"ping\", \"pingid\": \"" + str(pingig) + "\" }")
 
             minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
             if minsToSwitchOff < 1440 and (minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0):
