@@ -17,11 +17,41 @@ import hashlib
 import struct
 import base64
 import urllib
+import websocket
 
 from urllib.parse import quote_plus
 from urllib.request import urlopen
 from socketserver import ThreadingMixIn
 from threading import Thread
+
+class Gender:
+    on = ""
+    off = ""
+
+    def __init__(self, on, off):
+        self.on = on
+        self.off = off
+
+gMale = Gender("включен", "выключен")
+gFemale = Gender("включена", "выключена")
+gMany = Gender("включены", "выключены")
+gThird = Gender("включено", "выключено")
+
+httpd = None
+clockWs = []
+
+relays = {\
+    93: [\
+        { "name": "Лампа на шкафу", "state": False, "gender": gFemale },\
+        { "name": "Колонки", "state": False, "gender": gMany },\
+        { "name": "Освещение в коридоре", "state": False, "gender": gThird },\
+        { "name": "Пустая релюха", "state": False, "gender": gFemale },\
+    ],\
+    112: [\
+        { "name": "Потолочная лампа на кухне", "state": False, "gender": gFemale },\
+        { "name": "Лента освещения на кухне", "state": False, "gender": gFemale },\
+    ],\
+}
 
 def nameForCompare(st):
     return st["cat"].lower() + st["name"].lower()\
@@ -36,12 +66,18 @@ def nameForCompare(st):
 def timeToSleepNever():
     return time.time() + 100*365*24*60*60  
 
-def reportText(text):
+def asyncHttpReq(urlToFetch):
     def open_website(url):
         return urlopen(url)
 
+    Thread(target=open_website, args=[urlToFetch]).start()
 
-    Thread(target=open_website, args=["http://192.168.121.75/show?text="+quote_plus(text)]).start()
+def reportText(text):
+    for ws in clockWs:
+        ws.send("{ \"type\": \"show\", \"text\": \"" + text + "\" }")
+    #    except Exception as e:
+    #       # Nothing to do?
+    # asyncHttpReq("http://192.168.121.75/show?text="+quote_plus(text))
 
 class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     pass
@@ -56,6 +92,26 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     def __init__(self, *args):
         HTTPServer.__init__(self, *args)
         self.loadM3U()
+
+    def adbShellCommand(self, command):
+        return self.server.adbShellCommand(command)
+
+    def volUp(self):
+        reportText("Громче")
+        self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
+
+    def volDown(self):
+        reportText("Тише")
+        self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
+
+    def switchRelay(self, controller, relay):
+        currRelay = relays[controller][relay]
+        
+        asyncHttpReq("http://192.168.121."+str(controller)+"/switch?id="+str(relay)+"&on=" + ("false" if currRelay["state"] else "true"))
+
+        currRelay["state"] = not currRelay["state"]
+
+        reportText(currRelay["name"] + " " + (currRelay["gender"].on if currRelay["state"] else currRelay["gender"].off) + "")
 
     def adbShellCommand(self, command):
         process = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -128,15 +184,68 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         except Exception as e:
             logging.info("FAILED TO LOAD CHANNELS:" + str(e))
 
+def webSocketLoop():
+    last = {}
+
+    def on_message(ws, message):
+        msg = json.loads(message)
+        
+        if msg["type"] == "ir_key":
+            now = msg["day"] * 24 * 60 * 60 * 1000 + msg["timems"]
+            if not (msg["remote"] in last):
+                last[msg["remote"]] = 0
+
+            if now - last[msg["remote"]] > 200:
+                last[msg["remote"]] = now
+                if msg["key"] == "volume_up":
+                    httpd.volUp()
+                elif msg["key"] == "volume_down":
+                    httpd.volDown()
+                if msg["key"] == "n1":
+                    httpd.switchRelay(93, 0)
+                if msg["key"] == "n2":
+                    httpd.switchRelay(93, 1)
+                if msg["key"] == "n3":
+                    httpd.switchRelay(93, 2)
+                if msg["key"] == "n4":
+                    httpd.switchRelay(93, 3)
+                if msg["key"] == "n5":
+                    httpd.switchRelay(112, 0)
+                if msg["key"] == "n6":
+                    httpd.switchRelay(112, 1)
+                if msg["key"] == "n0":
+                    httpd.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=K59KKnIbIaM\" --ez force_fullscreen true")
+                    reportText("Включаем Россия 24")
+                else:
+                    print(msg["remote"] + " " + msg["key"])
+        elif msg["type"] == "log":
+            print(msg["val"])
+        else:
+            print(msg)
+
+    def on_error(ws, error):
+        print(error)
+
+    def on_close(ws):
+        clockWs.remove(ws)
+        print("### closed ###")
+
+    ws = websocket.WebSocketApp("ws://192.168.121.75:8081/",
+                            on_message = on_message,
+                            on_error = on_error,
+                            on_close = on_close)
+    clockWs.append(ws)
+
+    ws.run_forever()
+
+    print("Web socket is closed!")
+
 class HomeHTTPHandler(BaseHTTPRequestHandler):
     def writeResult(self, res):
         self.send_response(200)
         self.send_header('Content-type', 'application/json;charset=utf-8')
         self.end_headers()
         self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
-
-    def adbShellCommand(self, command):
-        return self.server.adbShellCommand(command)
 
     def stopCurrent(self):
         self.adbShellCommand("am force-stop org.videolan.vlc")
@@ -228,12 +337,10 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.playCurrent()
             self.writeResult("OK")
         elif pathList == list(["tablet", "volup"]):
-            reportText("Громче")
-            self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
+            httpd.volUp()
             self.writeResult("OK")
         elif pathList == list(["tablet", "voldown"]):
-            reportText("Тише")
-            self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
+            httpd.volDown()
             self.writeResult("OK")
         elif pathList == list(["tablet", "onoff"]):
             self.adbShellCommand("input keyevent KEYCODE_POWER")
@@ -272,6 +379,8 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             reportText("Включаем свет")
             self.milightCommand(b'\xc2\x00\x55') # all white
             self.writeResult("OK")
+        elif pathList[0] == "relay":
+            asyncHttpReq("http://192.168.121." + pathList[1] + "/switch?id=" + pathList[2] + "&on=" + pathList[3])
         elif pathList[0] == "light" and pathList[1] == "brightness":
             reportText("Яркость " + pathList[2] + "%")
             # passed brightness is in format 0..100
@@ -291,6 +400,7 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
     logging.basicConfig(level=logging.INFO)
     server_address = ('', port)
 
+    global httpd
     httpd = server_class(server_address, handler_class)
 
     def loop():
@@ -299,6 +409,9 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
             time.sleep(5)
             
             httpd.loadM3UIfNeeded()
+
+            asyncHttpReq("http://192.168.121.112/")
+            asyncHttpReq("http://192.168.121.93/")
 
             minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
             if minsToSwitchOff < 1440 and (minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0):
@@ -313,7 +426,8 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                 httpd.adbShellCommand("input keyevent KEYCODE_POWER")
                 sleepAt = httpd.timeToSleepNever()
 
-    Thread(target=loop).start()  
+    Thread(target=loop).start()
+    Thread(target=webSocketLoop).start()
 
     logging.info('Starting httpd...\n')
     try:

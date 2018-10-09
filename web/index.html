@@ -41,6 +41,12 @@
                         playYoutube();
                     }
                 }, false); 
+            document.getElementById('youtubeChannelURL').addEventListener('keypress',
+                function(e) {
+                    if (e.keyCode == 13) {
+                        playYoutube();
+                    }
+                }, false); 
             document.getElementById('stopYoutube').addEventListener('click', 
                 function(e) {
                     sendReq("/tablet/youtube/stop");
@@ -140,11 +146,38 @@
             </select>
             <hr/>
             <div>
-                <button class='action' data-url='/light/on     ' > LIGHT ON </button>
-                <button class='action' data-url='/light/off    ' > LIGHT OFF </button>
+                <button class='action' data-url='/light/on'  > LIGHT ON </button>
+                <button class='action' data-url='/light/off' > LIGHT OFF </button>
                 <input type="range" id="birghtness" name="birghtness" min="0" max="100" />
             </div>
             <hr/>
+            <div>
+                <span>KITCHEN: </span>
+                <span>SMALL: </span>
+                <button class='action' data-url='/relay/112/1/true'  > LIGHT ON </button>
+                <button class='action' data-url='/relay/112/1/false' > LIGHT OFF </button>
+                <span>BIG: </span>
+                <button class='action' data-url='/relay/112/0/true'  > LIGHT ON </button>
+                <button class='action' data-url='/relay/112/0/false' > LIGHT OFF </button>
+            </div>
+            <hr/>
+            <div>
+                <span>CORIDOR: </span>
+                <button class='action' data-url='/relay/93/2/true'  > LIGHT ON </button>
+                <button class='action' data-url='/relay/93/2/false' > LIGHT OFF </button>
+            </div>
+            <hr/>
+            <div>
+                <span>LIGHT ON CUPBOARD: </span>
+                <button class='action' data-url='/relay/93/0/true'  >  ON   </button>
+                <button class='action' data-url='/relay/93/0/false' >  OFF  </button>
+            </div>
+            <hr/>
+            <div>
+                <span>SPEAKER: </span>
+                <button class='action' data-url='/relay/93/1/true'  >  ON   </button>
+                <button class='action' data-url='/relay/93/1/false' >  OFF  </button>
+            </div>
         </td></tr>
         <tr><td class='channels'>
             <!--{{{channels}}}-->               
