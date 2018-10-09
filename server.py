@@ -18,6 +18,7 @@ import struct
 import base64
 import urllib
 import websocket
+import traceback
 
 from urllib.parse import quote_plus
 from urllib.request import urlopen
@@ -106,16 +107,20 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         reportText("Тише")
         self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
 
-    def switchRelay(self, controller, relay):
+    def turnRelay(self, controller, relay, on):
         currRelay = relays[controller][relay]
         
-        asyncHttpReq("http://192.168.121."+str(controller)+"/switch?id="+str(relay)+"&on=" + ("false" if currRelay["state"] else "true"))
+        asyncHttpReq("http://192.168.121."+str(controller)+"/switch?id="+str(relay)+"&on=" + ("true" if on else "false"))
 
-        currRelay["state"] = not currRelay["state"]
+        currRelay["state"] = on
 
-        reportText(currRelay["name"] + " " + (currRelay["gender"].on if currRelay["state"] else currRelay["gender"].off) + "")
+        reportText(currRelay["name"] + " " + (currRelay["gender"].on if on else currRelay["gender"].off) + "")
+
+    def switchRelay(self, controller, relay):
+        self.turnRelay(controller, relay, not relays[controller][relay]["state"])
 
     def adbShellCommand(self, command):
+        logging.info("adb shell " + command)
         process = subprocess.Popen("adb shell " + command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         resultOut, resultErr = process.communicate()
         if len(resultErr) > 0:
@@ -125,11 +130,37 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             resultOut, resultErr = process.communicate()
         return resultOut
 
+    def isTabletAwake(self):
+        allTheLines = self.adbShellCommand("dumpsys power").decode("utf-8").splitlines()
+
+        return "true" in next(filter(lambda ll: 'mHoldingWakeLockSuspendBlocker=' in ll, allTheLines))
+        
+    def switchTable(self):
+        self.adbShellCommand("input keyevent KEYCODE_POWER")
+
     def loadM3UIfNeeded(self):
         if len(self.youtubeChannels) == 0 or (time.time() - self.loadedChannelsAt) > 3600:
             # logging.info("Last load at " + str(time.time() - self.loadedChannelsAt))
             # we load channels each hour or on start
             self.loadM3U()
+
+    def awakeTabletIfNeeded(self):
+        if not self.isTabletAwake():
+            self.switchTable()
+        self.turnRelay(93, 1, True)
+
+    def playYoutubeURL(self, youtubeURL):
+        self.awakeTabletIfNeeded()
+
+        self.adbShellCommand("am start -a android.intent.action.VIEW -d \"" + youtubeURL\
+                .replace("&", "\&")\
+                .replace("https:", "http:")\
+                + "\" --ez force_fullscreen true")
+
+    def playYoutube(self, youtubeId):
+        self.awakeTabletIfNeeded()
+
+        self.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=" + youtubeId + "\" --ez force_fullscreen true")
 
     def loadM3U(self):
         try:
@@ -216,7 +247,7 @@ def webSocketLoop():
                 if msg["key"] == "n6":
                     httpd.switchRelay(112, 1)
                 if msg["key"] == "n0":
-                    httpd.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=K59KKnIbIaM\" --ez force_fullscreen true")
+                    httpd.playYoutube("K59KKnIbIaM")
                     reportText("Включаем Россия 24")
                 else:
                     print(msg["remote"] + " " + msg["key"])
@@ -323,83 +354,94 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("UNKNOWN CMD {}".format(self.path))
 
     def do_POST(self):
-        pathList = list(filter(None, self.path.split("/")))
-        if pathList[0] == "init":
-            self.send_response(200)
-        elif pathList[0] == "tablet" and pathList[1] == "play":
-            if (len(pathList) > 2):
-                self.server.youtubeChannel = pathList[2]
-                ytb = self.server.youtubeChannelsByIds[self.server.youtubeChannel]
-                reportText("Включаем " + ytb["name"])
-                
-            self.playCurrent()
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "stop"]):
-            self.stopCurrent()
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "playagain"]):
-            self.stopCurrent()
-            self.playCurrent()
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "volup"]):
-            httpd.volUp()
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "voldown"]):
-            httpd.volDown()
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "onoff"]):
-            httpd.adbShellCommand("input keyevent KEYCODE_POWER")
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "russia24"]):
-            httpd.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=K59KKnIbIaM\" --ez force_fullscreen true")
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "youtube", "stop"]):
-            httpd.adbShellCommand("am force-stop com.google.android.youtube")
-            self.writeResult("OK")
-        elif pathList[0] == "tablet" and pathList[1] ==  "youtube":
-            httpd.adbShellCommand("am start -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=" + pathList[2] + "\" --ez force_fullscreen true")
-            self.writeResult("OK")
-        elif pathList[0] == "tablet" and pathList[1] ==  "youtubeURL":
-            logging.info('Playing ' + urllib.parse.unquote(pathList[2]))
-            httpd.adbShellCommand("am start -a android.intent.action.VIEW -d \"" + urllib.parse.unquote(pathList[2])\
-                .replace("&", "\&")\
-                .replace("https:", "http:")\
-                + "\" --ez force_fullscreen true")
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "reboot"]):
-            httpd.adbShellCommand("reboot")
-            self.writeResult("OK")
-        elif pathList == list(["self", "reboot"]):
-            subprocess.Popen("reboot", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read() # Reboot self
-            self.writeResult("OK")
-        elif pathList[0] == "tablet" and pathList[1] == "sleepin":
-            self.server.sleepAt = time.time() + int(pathList[2])
+        try:
+            pathList = list(filter(None, self.path.split("/")))
+            if pathList[0] == "init":
+                self.send_response(200)
+            elif pathList[0] == "tablet" and pathList[1] == "play":
+                if (len(pathList) > 2):
+                    self.server.youtubeChannel = pathList[2]
+                    ytb = self.server.youtubeChannelsByIds[self.server.youtubeChannel]
+                    reportText("Включаем " + ytb["name"])
+                    
+                self.playCurrent()
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "stop"]):
+                self.stopCurrent()
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "playagain"]):
+                self.stopCurrent()
+                self.playCurrent()
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "volup"]):
+                httpd.volUp()
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "voldown"]):
+                httpd.volDown()
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "on"]):
+                if not httpd.isTabletAwake():
+                    httpd.switchTable()
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "off"]):
+                if httpd.isTabletAwake():
+                    httpd.switchTable()
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "onoff"]):
+                httpd.switchTable()
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "russia24"]):
+                httpd.playYoutube("K59KKnIbIaM")
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "youtube", "stop"]):
+                httpd.adbShellCommand("am force-stop com.google.android.youtube")
+                self.writeResult("OK")
+            elif pathList[0] == "tablet" and pathList[1] ==  "youtube":
+                httpd.playYoutube(pathList[2])
+                self.writeResult("OK")
+            elif pathList[0] == "tablet" and pathList[1] ==  "youtubeURL":
+                httpd.playYoutubeURL(urllib.parse.unquote(pathList[2]))
+                self.writeResult("OK")
+            elif pathList == list(["tablet", "reboot"]):
+                httpd.adbShellCommand("reboot")
+                self.writeResult("OK")
+            elif pathList == list(["self", "reboot"]):
+                subprocess.Popen("reboot", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read() # Reboot self
+                self.writeResult("OK")
+            elif pathList[0] == "tablet" and pathList[1] == "sleepin":
+                self.server.sleepAt = time.time() + int(pathList[2])
 
-            minsToSwitchOff = int((self.server.sleepAt - time.time())/60)
-            secsToSwitchOff = int((self.server.sleepAt - time.time())%60)
-            reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут " + str(secsToSwitchOff) + " секунд")
+                minsToSwitchOff = int((self.server.sleepAt - time.time())/60)
+                secsToSwitchOff = int((self.server.sleepAt - time.time())%60)
+                reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут " + str(secsToSwitchOff) + " секунд")
 
-            self.writeResult("OK")
-        elif pathList == list(["light", "on"]):
-            reportText("Включаем свет")
-            self.milightCommand(b'\xc2\x00\x55') # all white
-            self.writeResult("OK")
-        elif pathList[0] == "relay":
-            asyncHttpReq("http://192.168.121." + pathList[1] + "/switch?id=" + pathList[2] + "&on=" + pathList[3])
-        elif pathList[0] == "light" and pathList[1] == "brightness":
-            reportText("Яркость " + pathList[2] + "%")
-            # passed brightness is in format 0..100
-            ba = bytearray(b'\x4E\x00\x55')
-            ba[1] = int(0x2 + (0x15 * int(pathList[2]) / 100))
-            self.milightCommand(bytes(ba)) # 
-            self.writeResult("OK")
-        elif pathList == list(["light", "low"]):
-            self.milightCommand(b'\x45\x02\x55')
-            self.writeResult("OK")
-        elif pathList == list(["light", "off"]):
-            reportText("Выключаем свет")
-            self.milightCommand(b'\x46\x00\x55')
-            self.writeResult("OK")
+                self.writeResult("OK")
+            elif pathList == list(["light", "on"]):
+                reportText("Включаем свет")
+                self.milightCommand(b'\xc2\x00\x55') # all white
+                self.writeResult("OK")
+            elif pathList[0] == "relay":
+                httpd.turnRelay(int(pathList[1]), int(pathList[2]), pathList[3] == "true")
+            elif pathList[0] == "light" and pathList[1] == "brightness":
+                reportText("Яркость " + pathList[2] + "%")
+                # passed brightness is in format 0..100
+                ba = bytearray(b'\x4E\x00\x55')
+                ba[1] = int(0x2 + (0x15 * int(pathList[2]) / 100))
+                self.milightCommand(bytes(ba)) # 
+                self.writeResult("OK")
+            elif pathList == list(["light", "low"]):
+                self.milightCommand(b'\x45\x02\x55')
+                self.writeResult("OK")
+            elif pathList == list(["light", "off"]):
+                reportText("Выключаем свет")
+                self.milightCommand(b'\x46\x00\x55')
+                self.writeResult("OK")
+        except Exception as e:
+            logging.error(e)
+            self.send_response(500)
+            self.send_header('Content-type', 'text/plain;charset=utf-8')
+            self.end_headers()
+            self.wfile.write(str(e))
 
 def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8080):
     logging.basicConfig(level=logging.INFO)
@@ -433,7 +475,15 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                 
             # Let's check sleeping
             if httpd.sleepAt < time.time():
-                httpd.adbShellCommand("input keyevent KEYCODE_POWER")
+                reportText("Выключаемся...")
+                httpd.turnRelay(93, 0, False)
+                httpd.turnRelay(93, 1, False)
+                httpd.turnRelay(93, 2, False)
+                httpd.turnRelay(112, 0, False)
+                httpd.turnRelay(112, 1, False)
+                if httpd.isTabletAwake():
+                    httpd.adbShellCommand("input keyevent KEYCODE_POWER")
+
                 sleepAt = httpd.timeToSleepNever()
 
     Thread(target=loop).start()
