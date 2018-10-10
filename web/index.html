@@ -76,6 +76,26 @@
             }, false);
             updateCategory();
 
+
+            var selHours = document.getElementById('wakehrs');
+            for (var i = 0; i < 24; ++i) {
+                var opt = document.createElement('option');
+                opt.value = i;
+                opt.innerHTML = i;
+                selHours.appendChild(opt);
+            }
+
+            var selMins = document.getElementById('wakemins');
+            for (var i = 0; i < 60; ++i) {
+                var opt = document.createElement('option');
+                opt.value = i;
+                opt.innerHTML = i;
+                selMins.appendChild(opt);
+            }
+            document.getElementById('wakeBtn').addEventListener('click', 
+                function(e) {
+                    sendReq("/tablet/wakeat/" + (selHours.selectedIndex) + "/" + (selMins.selectedIndex));
+                }, false);
         }
     </script>
     <style>
@@ -139,6 +159,11 @@
                 <button class='action' data-url='/tablet/sleepin/1800' >    SLEEP in 30min   </button>
                 <button class='action' data-url='/tablet/sleepin/3600' >     SLEEP in 1h     </button>
                 <button class='action' data-url='/tablet/sleepin/7200' >     SLEEP in 2h     </button>
+            </div>
+            <div>
+                <select id='wakehrs'></select>&nbsp;
+                <select id='wakemins'></select>&nbsp;
+                <button id='wakeBtn'>  SET  </button>
             </div>
             <hr/>
             <select id='categories'>

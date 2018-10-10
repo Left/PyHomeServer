@@ -12,6 +12,7 @@ import re
 import os
 import socket
 import time
+import datetime
 import json
 import hashlib
 import struct
@@ -41,19 +42,6 @@ gThird = Gender("включено", "выключено")
 httpd = None
 pingig = 1
 
-relays = {\
-    93: [\
-        { "name": "Лампа на шкафу", "state": False, "gender": gFemale },\
-        { "name": "Колонки", "state": False, "gender": gMany },\
-        { "name": "Освещение в коридоре", "state": False, "gender": gThird },\
-        { "name": "Пустая релюха", "state": False, "gender": gFemale },\
-    ],\
-    112: [\
-        { "name": "Потолочная лампа на кухне", "state": False, "gender": gFemale },\
-        { "name": "Лента освещения на кухне", "state": False, "gender": gFemale },\
-    ],\
-}
-
 def nameForCompare(st):
     return st["cat"].lower() + st["name"].lower()\
         .replace("_", " ")\
@@ -70,6 +58,44 @@ def timeToSleepNever():
 def reportText(text):
     clockWs.send("{ \"type\": \"show\", \"text\": \"" + text + "\" }")
 
+def timeBefore(timeInSecs):
+    hoursToSwitchOff = int((timeInSecs - time.time())/60/60)
+    minsToSwitchOff = int((timeInSecs - time.time())/60)%60
+    secsToSwitchOff = int((timeInSecs - time.time())%60)
+    return (str(hoursToSwitchOff) + "часов " if hoursToSwitchOff > 0 else "") + str(minsToSwitchOff) + " минут " + str(secsToSwitchOff) + " секунд"
+
+
+class MiLight:
+    on = False
+    brightness = 50
+
+    def __init__(self, ip, port):
+        self.ip = ip
+        self.port = port
+
+    def allWhite(self):
+        self.on = True
+        self.milightCommand(b'\xc2\x00\x55') # all white
+
+    def brightness(self, percent):
+        # passed brightness is in format 0..100
+        ba = bytearray(b'\x4E\x00\x55')
+        ba[1] = int(0x2 + (0x15 * percent / 100))
+        self.brightness = percent
+        self.milightCommand(bytes(ba)) # 
+
+    def off(self):
+        self.on = False
+        self.milightCommand(b'\x46\x00\x55')
+
+    def milightCommand(self, cmd):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
+        sock.sendto(cmd, (self.ip, self.port))
+
+
+milight = MiLight("192.168.121.35", 8899)
+
+
 class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     pass
 
@@ -79,6 +105,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     youtubeChannelsByIds = {}
 
     sleepAt = timeToSleepNever() # Sleep tablet at that time
+    wakeAt = timeToSleepNever()
 
     def __init__(self, *args):
         HTTPServer.__init__(self, *args)
@@ -95,18 +122,18 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         reportText("Тише")
         self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
 
-    def turnRelay(self, controller, relay, on):
-        currRelay = relays[controller][relay]
-        relayComm = relayRoom if controller == 93 else relayKitchen
-        
+    def turnRelay(self, relayComm, relay, on):       
         relayComm.send("{ \"type\": \"switch\", \"id\": \"" + str(relay) + "\", \"on\": \"" + ("true" if on else "false") + "\" }")
 
+        logging.info("Turned " + ("on" if on else "off") + " relay " + str(relay) + " at " + relayComm.ip)
+
+        currRelay = relayComm.relays[relay]
         currRelay["state"] = on
 
         reportText(currRelay["name"] + " " + (currRelay["gender"].on if on else currRelay["gender"].off) + "")
 
-    def switchRelay(self, controller, relay):
-        self.turnRelay(controller, relay, not relays[controller][relay]["state"])
+    def switchRelay(self, relayComm, relay):
+        self.turnRelay(relayComm, relay, not relayComm.relays[relay]["state"])
 
     def adbShellCommand(self, command):
         logging.info("adb shell " + command)
@@ -136,7 +163,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     def awakeTabletIfNeeded(self):
         if not self.isTabletAwake():
             self.switchTable()
-        self.turnRelay(93, 1, True)
+        self.turnRelay(relayRoom, 1, True)
 
     def playYoutubeURL(self, youtubeURL):
         self.awakeTabletIfNeeded()
@@ -211,15 +238,22 @@ class DeviceCommunicationChannel():
     ws = None
     lastMsgReceived = 0
 
-    def __init__(self, ip, packetsProcessor):
+    def __init__(self, ip, packetsProcessor, relays):
         self.ip = ip
         self.packetsProcessor = packetsProcessor
+        self.relays = relays
 
     def start(self):
         Thread(target=self.webSocketLoop).start()
 
     def send(self, str):
-        self.ws.send(str)
+        try:
+            self.ws.send(str)
+        except Exception:
+            self.ws.close()
+            traceback.print_exc()
+            pass
+        
 
     def ping(self):
         if (time.time() - self.lastMsgReceived) > 6:
@@ -233,26 +267,25 @@ class DeviceCommunicationChannel():
             try:
                 msg = json.loads(message)
                 self.lastMsgReceived = time.time()
-                # print(message)
-                
+                # logging.info("Received from " + self.ip + ": " + message)
+
                 if "type" in msg and msg["type"] == "log":
                     # Just logging, print it
-                    print(msg["val"])
+                    logging.info(self.ip + ": " + msg["val"])
                 else:
                     # let lambda process it
                     self.packetsProcessor(msg)           
             except Exception:
+                logging.info(self.ip + ": Exception for connection")
                 traceback.print_exc()
                 pass
 
         def on_error(ws, error):
-            print("\n")
-            print(error)
-            print("\n")
+            logging.info(error)
             self.ws.close()
 
         def on_close(ws):
-            print("### closed ###")
+            logging.info(self.ip + ": ### closed ### ")
 
         while True:
             self.lastMsgReceived = time.time()
@@ -261,7 +294,7 @@ class DeviceCommunicationChannel():
                                     on_error = on_error,
                                     on_close = on_close)
             self.ws.run_forever()
-            print("Web socket is closed!")
+            logging.info(self.ip + ": Web socket is closed")
 
 class HomeHTTPHandler(BaseHTTPRequestHandler):
     def writeResult(self, res):
@@ -279,10 +312,6 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         httpd.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -d \"" + 
                 self.server.youtubeChannelsByIds[self.server.youtubeChannel]["url"] + 
                 "\"")
-
-    def milightCommand(self, cmd):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
-        sock.sendto(cmd, ("192.168.121.35", 8899))
  
     def do_GET(self):
         logging.info("GET request,\nPath: %s", str(self.path))
@@ -398,30 +427,37 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             elif pathList[0] == "tablet" and pathList[1] == "sleepin":
                 self.server.sleepAt = time.time() + int(pathList[2])
 
-                minsToSwitchOff = int((self.server.sleepAt - time.time())/60)
-                secsToSwitchOff = int((self.server.sleepAt - time.time())%60)
-                reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут " + str(secsToSwitchOff) + " секунд")
+                reportText("Телевизор выключится через " + timeBefore(httpd.sleepAt))
+
+                self.writeResult("OK")
+            elif pathList[0] == "tablet" and pathList[1] == "wakeat":
+                hrs = int(pathList[2])
+                mins = int(pathList[3])
+                now = datetime.datetime.now()
+                if hrs < now.hour or (hrs == now.hour and mins < now.minute):
+                    #tomorrow
+                    httpd.wakeAt = time.time() + ((23 - now.hour)*60 + (59 - now.minute) + hrs*60 + mins)*60
+                else:
+                    #today
+                    httpd.wakeAt = time.time() + ((hrs - now.hour)*60 + (mins - now.minute))*60
+                reportText("Телевизор включится через " + timeBefore(httpd.wakeAt))
 
                 self.writeResult("OK")
             elif pathList == list(["light", "on"]):
                 reportText("Включаем свет")
-                self.milightCommand(b'\xc2\x00\x55') # all white
+                milight.allWhite()
                 self.writeResult("OK")
             elif pathList[0] == "relay":
-                httpd.turnRelay(int(pathList[1]), int(pathList[2]), pathList[3] == "true")
+                for ws in allWs:
+                    if ws.ip == ("192.168.121." + pathList[1]):
+                        httpd.turnRelay(ws, int(pathList[2]), pathList[3] == "true")
             elif pathList[0] == "light" and pathList[1] == "brightness":
                 reportText("Яркость " + pathList[2] + "%")
-                # passed brightness is in format 0..100
-                ba = bytearray(b'\x4E\x00\x55')
-                ba[1] = int(0x2 + (0x15 * int(pathList[2]) / 100))
-                self.milightCommand(bytes(ba)) # 
-                self.writeResult("OK")
-            elif pathList == list(["light", "low"]):
-                self.milightCommand(b'\x45\x02\x55')
+                milight.brightness(int(pathList[2]))
                 self.writeResult("OK")
             elif pathList == list(["light", "off"]):
                 reportText("Выключаем свет")
-                self.milightCommand(b'\x46\x00\x55')
+                milight.off()
                 self.writeResult("OK")
         except Exception as e:
             logging.error(e)
@@ -446,17 +482,23 @@ def clockRemoteCommands(msg):
                 elif msg["key"] == "volume_down":
                     httpd.volDown()
                 if msg["key"] == "n1":
-                    httpd.switchRelay(93, 0)
+                    httpd.switchRelay(relayRoom, 0)
                 if msg["key"] == "n2":
-                    httpd.switchRelay(93, 1)
+                    httpd.switchRelay(relayRoom, 1)
                 if msg["key"] == "n3":
-                    httpd.switchRelay(93, 2)
+                    httpd.switchRelay(relayRoom, 2)
                 if msg["key"] == "n4":
-                    httpd.switchRelay(93, 3)
+                    httpd.switchRelay(relayRoom, 3)
                 if msg["key"] == "n5":
-                    httpd.switchRelay(112, 0)
+                    httpd.switchRelay(relayKitchen, 0)
                 if msg["key"] == "n6":
-                    httpd.switchRelay(112, 1)
+                    httpd.switchRelay(relayKitchen, 1)
+                if msg["key"] == "n7":
+                    reportText("Включаем свет")
+                    if milight.on:
+                        milight.off()
+                    else:
+                        milight.allWhite()
                 if msg["key"] == "n0":
                     httpd.playYoutube("K59KKnIbIaM")
                     reportText("Включаем Россия 24")
@@ -472,9 +514,18 @@ def relayRemoteCommands(msg):
         # Nothing to do ATM?
         print(msg)
 
-clockWs = DeviceCommunicationChannel("192.168.121.75", clockRemoteCommands)
-relayRoom = DeviceCommunicationChannel("192.168.121.93", relayRemoteCommands)
-relayKitchen = DeviceCommunicationChannel("192.168.121.112", relayRemoteCommands)
+clockWs = DeviceCommunicationChannel("192.168.121.75", clockRemoteCommands, [])
+relayRoom = DeviceCommunicationChannel("192.168.121.93", relayRemoteCommands, [\
+    { "name": "Лампа на шкафу", "state": False, "gender": gFemale },\
+    { "name": "Колонки", "state": False, "gender": gMany },\
+    { "name": "Освещение в коридоре", "state": False, "gender": gThird },\
+    { "name": "Пустая релюха", "state": False, "gender": gFemale },\
+])
+
+relayKitchen = DeviceCommunicationChannel("192.168.121.112", relayRemoteCommands, [\
+    { "name": "Потолочная лампа на кухне", "state": False, "gender": gFemale },\
+    { "name": "Лента освещения на кухне", "state": False, "gender": gFemale },\
+])
 
 allWs = [ clockWs, relayRoom, relayKitchen ]
 
@@ -487,34 +538,61 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
 
     def loop():
         timeToSleepWasReported = False
-        while True: 
-            time.sleep(2)
-            
-            httpd.loadM3UIfNeeded()
-
-            for ws in allWs:
-                ws.ping()
-
-            minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
-            if minsToSwitchOff < 1440 and (minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0):
-                if not timeToSleepWasReported:
-                    reportText("Телевизор выключится через " + str(minsToSwitchOff) + " минут")
-                    timeToSleepWasReported = True
-            else:
-                timeToSleepWasReported = False
+        while True:
+            try:
+                time.sleep(3)
                 
-            # Let's check sleeping
-            if httpd.sleepAt < time.time():
-                reportText("Выключаемся...")
-                httpd.turnRelay(93, 0, False)
-                httpd.turnRelay(93, 1, False)
-                httpd.turnRelay(93, 2, False)
-                httpd.turnRelay(112, 0, False)
-                httpd.turnRelay(112, 1, False)
-                if httpd.isTabletAwake():
-                    httpd.adbShellCommand("input keyevent KEYCODE_POWER")
+                httpd.loadM3UIfNeeded()
 
-                sleepAt = httpd.timeToSleepNever()
+                for ws in allWs:
+                    try:
+                        ws.ping()
+                    except Exception:
+                        traceback.print_exc()
+
+                minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
+                if minsToSwitchOff < 1440 and (minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0):
+                    if not timeToSleepWasReported:
+                        reportText("Телевизор выключится через " + timeBefore(httpd.sleepAt))
+                        timeToSleepWasReported = True
+                else:
+                    timeToSleepWasReported = False
+                    
+                # Let's check sleeping
+                if httpd.sleepAt < time.time():
+                    logging.info("Sleeping!!!")
+                    reportText("Выключаемся...")
+                    milight.off()
+                    httpd.turnRelay(relayRoom, 0, False)
+                    time.sleep(1)
+                    httpd.turnRelay(relayRoom, 1, False)
+                    time.sleep(1)
+                    httpd.turnRelay(relayRoom, 2, False)
+                    time.sleep(1)
+                    httpd.turnRelay(relayKitchen, 0, False)
+                    time.sleep(1)
+                    httpd.turnRelay(relayKitchen, 1, False)
+                    if httpd.isTabletAwake():
+                        httpd.adbShellCommand("input keyevent KEYCODE_POWER")
+
+                    httpd.sleepAt = timeToSleepNever()
+
+                # logging.info("Time: " + str(time.time()) + " " + str(httpd.wakeAt))
+
+                if httpd.wakeAt < time.time():
+                    logging.info("Waking!!!")
+                    reportText("Включаемся...")
+                    milight.allWhite()
+                    httpd.turnRelay(relayRoom, 0, True)
+                    time.sleep(1)
+                    httpd.turnRelay(relayRoom, 1, True)
+                    if not httpd.isTabletAwake():
+                        httpd.adbShellCommand("input keyevent KEYCODE_POWER")
+                    httpd.playYoutube("K59KKnIbIaM")
+                    httpd.wakeAt = timeToSleepNever()
+
+            except Exception:
+                traceback.print_exc()
 
     Thread(target=loop).start()
     # Start all web communications
