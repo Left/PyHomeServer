@@ -67,17 +67,8 @@ def nameForCompare(st):
 def timeToSleepNever():
     return time.time() + 100*365*24*60*60  
 
-def asyncHttpReq(urlToFetch):
-    def open_website(url):
-        return urlopen(url)
-
-    Thread(target=open_website, args=[urlToFetch]).start()
-
 def reportText(text):
     clockWs.send("{ \"type\": \"show\", \"text\": \"" + text + "\" }")
-    #    except Exception as e:
-    #       # Nothing to do?
-    # asyncHttpReq("http://192.168.121.75/show?text="+quote_plus(text))
 
 class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     pass
@@ -106,8 +97,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
     def turnRelay(self, controller, relay, on):
         currRelay = relays[controller][relay]
+        relayComm = relayRoom if controller == 93 else relayKitchen
         
-        asyncHttpReq("http://192.168.121."+str(controller)+"/switch?id="+str(relay)+"&on=" + ("true" if on else "false"))
+        relayComm.send("{ \"type\": \"switch\", \"id\": \"" + str(relay) + "\", \"on\": \"" + ("true" if on else "false") + "\" }")
 
         currRelay["state"] = on
 
@@ -475,9 +467,16 @@ def clockRemoteCommands(msg):
     #elif "result" in msg:
     #    print(msg["result"])
 
-clockWs = DeviceCommunicationChannel("192.168.121.75", clockRemoteCommands)
+def relayRemoteCommands(msg):
+    if "type" in msg:
+        # Nothing to do ATM?
+        print(msg)
 
-allWs = [ clockWs ]
+clockWs = DeviceCommunicationChannel("192.168.121.75", clockRemoteCommands)
+relayRoom = DeviceCommunicationChannel("192.168.121.93", relayRemoteCommands)
+relayKitchen = DeviceCommunicationChannel("192.168.121.112", relayRemoteCommands)
+
+allWs = [ clockWs, relayRoom, relayKitchen ]
 
 def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8080):
     logging.basicConfig(level=logging.INFO)
@@ -492,9 +491,6 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
             time.sleep(2)
             
             httpd.loadM3UIfNeeded()
-
-            #asyncHttpReq("http://192.168.121.112/")
-            #asyncHttpReq("http://192.168.121.93/")
 
             for ws in allWs:
                 ws.ping()
