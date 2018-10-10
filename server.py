@@ -40,8 +40,6 @@ gThird = Gender("включено", "выключено")
 
 httpd = None
 pingig = 1
-allWs = []
-clockWs = []
 
 relays = {\
     93: [\
@@ -76,8 +74,7 @@ def asyncHttpReq(urlToFetch):
     Thread(target=open_website, args=[urlToFetch]).start()
 
 def reportText(text):
-    for ws in clockWs:
-        ws.send("{ \"type\": \"show\", \"text\": \"" + text + "\" }")
+    clockWs.send("{ \"type\": \"show\", \"text\": \"" + text + "\" }")
     #    except Exception as e:
     #       # Nothing to do?
     # asyncHttpReq("http://192.168.121.75/show?text="+quote_plus(text))
@@ -217,64 +214,62 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         except Exception as e:
             logging.info("FAILED TO LOAD CHANNELS:" + str(e))
 
-def webSocketLoop():
-    last = {}
+class DeviceCommunicationChannel():
+    pingig = 0
+    ws = None
+    lastMsgReceived = 0
 
-    def on_message(ws, message):
-        msg = json.loads(message)
-        
-        if msg["type"] == "ir_key":
-            now = msg["day"] * 24 * 60 * 60 * 1000 + msg["timems"]
-            if not (msg["remote"] in last):
-                last[msg["remote"]] = 0
+    def __init__(self, ip, packetsProcessor):
+        self.ip = ip
+        self.packetsProcessor = packetsProcessor
 
-            if now - last[msg["remote"]] > 200:
-                last[msg["remote"]] = now
-                if msg["key"] == "volume_up":
-                    httpd.volUp()
-                elif msg["key"] == "volume_down":
-                    httpd.volDown()
-                if msg["key"] == "n1":
-                    httpd.switchRelay(93, 0)
-                if msg["key"] == "n2":
-                    httpd.switchRelay(93, 1)
-                if msg["key"] == "n3":
-                    httpd.switchRelay(93, 2)
-                if msg["key"] == "n4":
-                    httpd.switchRelay(93, 3)
-                if msg["key"] == "n5":
-                    httpd.switchRelay(112, 0)
-                if msg["key"] == "n6":
-                    httpd.switchRelay(112, 1)
-                if msg["key"] == "n0":
-                    httpd.playYoutube("K59KKnIbIaM")
-                    reportText("Включаем Россия 24")
-                else:
-                    print(msg["remote"] + " " + msg["key"])
-        elif msg["type"] == "log":
-            print(msg["val"])
+    def start(self):
+        Thread(target=self.webSocketLoop).start()
+
+    def send(self, str):
+        self.ws.send(str)
+
+    def ping(self):
+        if (time.time() - self.lastMsgReceived) > 6:
+            self.ws.close()
         else:
-            print(msg)
+            self.pingig += 1
+            self.ws.send("{ \"type\": \"ping\", \"pingid\": \"" + str(self.pingig) + "\" }")
 
-    def on_error(ws, error):
-        print(error)
+    def webSocketLoop(self):
+        def on_message(ws, message):
+            try:
+                msg = json.loads(message)
+                self.lastMsgReceived = time.time()
+                # print(message)
+                
+                if "type" in msg and msg["type"] == "log":
+                    # Just logging, print it
+                    print(msg["val"])
+                else:
+                    # let lambda process it
+                    self.packetsProcessor(msg)           
+            except Exception:
+                traceback.print_exc()
+                pass
 
-    def on_close(ws):
-        clockWs.remove(ws)
-        allWs.remove(ws)
-        print("### closed ###")
+        def on_error(ws, error):
+            print("\n")
+            print(error)
+            print("\n")
+            self.ws.close()
 
-    ws = websocket.WebSocketApp("ws://192.168.121.75:8081/",
-                            on_message = on_message,
-                            on_error = on_error,
-                            on_close = on_close)
+        def on_close(ws):
+            print("### closed ###")
 
-    allWs.append(ws)
-    clockWs.append(ws)
-
-    ws.run_forever()
-
-    print("Web socket is closed!")
+        while True:
+            self.lastMsgReceived = time.time()
+            self.ws = websocket.WebSocketApp("ws://" + self.ip + ":8081/",
+                                    on_message = on_message,
+                                    on_error = on_error,
+                                    on_close = on_close)
+            self.ws.run_forever()
+            print("Web socket is closed!")
 
 class HomeHTTPHandler(BaseHTTPRequestHandler):
     def writeResult(self, res):
@@ -443,27 +438,66 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(str(e))
 
+last = {}
+
+def clockRemoteCommands(msg):
+    if "type" in msg:
+        if msg["type"] == "ir_key":
+            now = msg["day"] * 24 * 60 * 60 * 1000 + msg["timems"]
+            if not (msg["remote"] in last):
+                last[msg["remote"]] = 0
+
+            if now - last[msg["remote"]] > 200:
+                last[msg["remote"]] = now
+                if msg["key"] == "volume_up":
+                    httpd.volUp()
+                elif msg["key"] == "volume_down":
+                    httpd.volDown()
+                if msg["key"] == "n1":
+                    httpd.switchRelay(93, 0)
+                if msg["key"] == "n2":
+                    httpd.switchRelay(93, 1)
+                if msg["key"] == "n3":
+                    httpd.switchRelay(93, 2)
+                if msg["key"] == "n4":
+                    httpd.switchRelay(93, 3)
+                if msg["key"] == "n5":
+                    httpd.switchRelay(112, 0)
+                if msg["key"] == "n6":
+                    httpd.switchRelay(112, 1)
+                if msg["key"] == "n0":
+                    httpd.playYoutube("K59KKnIbIaM")
+                    reportText("Включаем Россия 24")
+                else:
+                    print(msg["remote"] + " " + msg["key"])
+        else:
+            print("Unrecognized type:" + msg["type"])
+    #elif "result" in msg:
+    #    print(msg["result"])
+
+clockWs = DeviceCommunicationChannel("192.168.121.75", clockRemoteCommands)
+
+allWs = [ clockWs ]
+
 def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8080):
     logging.basicConfig(level=logging.INFO)
     server_address = ('', port)
 
     global httpd
-    global pingig
     httpd = server_class(server_address, handler_class)
 
     def loop():
         timeToSleepWasReported = False
         while True: 
-            time.sleep(3)
+            time.sleep(2)
             
             httpd.loadM3UIfNeeded()
 
             #asyncHttpReq("http://192.168.121.112/")
             #asyncHttpReq("http://192.168.121.93/")
 
-            #for ws in allWs:
-            #    pingig = pingig + 1
-            #    ws.send("{ \"type\": \"ping\", \"pingid\": \"" + str(pingig) + "\" }")
+            for ws in allWs:
+                ws.ping()
 
             minsToSwitchOff = int((httpd.sleepAt - time.time())/60)
             if minsToSwitchOff < 1440 and (minsToSwitchOff == 1 or minsToSwitchOff == 2 or minsToSwitchOff%5==0):
@@ -487,7 +521,9 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                 sleepAt = httpd.timeToSleepNever()
 
     Thread(target=loop).start()
-    Thread(target=webSocketLoop).start()
+    # Start all web communications
+    for ws in allWs:
+        ws.start()
 
     logging.info('Starting httpd...\n')
     try:
