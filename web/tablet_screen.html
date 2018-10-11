@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <script type="text/javascript">
+        function sendReq(url) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", url, true);
+            xhr.onload = function() {};
+            xhr.send(); 
+        }
+
+        window.onload = function() {
+            var scr = document.getElementById('mainScr');
+            scr.onclick = (e) => {
+                // console.log(e.offsetX + "  " + e.offsetY);
+                sendReq("tablet/tap/" + e.offsetX + "/" + e.offsetY);
+                setTimeout(() => scr.src = 'tablet/screen?t=' + new Date().getTime(), 1000);
+            }
+
+            document.body.onkeypress = (e) => {
+                // console.log(e.key);
+                sendReq("tablet/text/" + encodeURIComponent(e.key));
+            }
+
+            setInterval(() => scr.src = 'tablet/screen?t=' + new Date().getTime(), 4000);
+        };
+    </script>
+</head>
+<body>
+    <img id='mainScr' src='tablet/screen?t=initial'/>
+</body>

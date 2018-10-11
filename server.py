@@ -20,6 +20,7 @@ import base64
 import urllib
 import websocket
 import traceback
+import binascii
 
 from urllib.parse import quote_plus
 from urllib.request import urlopen
@@ -170,7 +171,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
         self.adbShellCommand("am start -a android.intent.action.VIEW -d \"" + youtubeURL\
                 .replace("&", "\&")\
-                .replace("https:", "http:")\
+                .replace("https://", "http://")\
                 + "\" --ez force_fullscreen true")
 
     def playYoutube(self, youtubeId):
@@ -315,15 +316,16 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
  
     def do_GET(self):
         logging.info("GET request,\nPath: %s", str(self.path))
-        pathList = list(filter(None, self.path.split("/")))
+        # pathList = list(filter(None, self.path.split("/")))
+        pathList = list(filter(None, self.path.split("?")[0].split("/")))
         
-        if len(pathList) == 0:
+        if len(pathList) == 0 or ".html" in pathList[0]:
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
 
             htmlContent = ""
-            with open(os.path.dirname(os.path.abspath(__file__)) + '/web/index.html', 'r') as myfile:
+            with open(os.path.dirname(os.path.abspath(__file__)) + '/web/' + ("index.html" if len(pathList) == 0 else pathList[0]), 'r') as myfile:
                 htmlContent = myfile.read()
 
             strr = ""
@@ -365,13 +367,26 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'image/bmp')
             self.end_headers()
 
-            self.wfile.write(re.sub(b'\r\n', b'\n', httpd.adbShellCommand("screencap -p")))
+            t = time.time()
+
+            rawCapture = httpd.adbShellCommand("screencap -p")
+
+            logging.info("captured screen " + str(time.time() - t))
+
+            screenRaw = re.sub(b'\r\n', b'\n', rawCapture)
+
+            logging.info("decoding screen " + str(time.time() - t))
+
+            self.wfile.write(screenRaw)
+            self.wfile.flush()
+            
         else:
             self.writeResult("UNKNOWN CMD {}".format(self.path))
 
     def do_POST(self):
         try:
-            pathList = list(filter(None, self.path.split("/")))
+            pathList = list(filter(None, self.path.split("?")[0].split("/")))
+            logging.info(self.path + " -> " + str(pathList))
             if pathList[0] == "init":
                 self.send_response(200)
             elif pathList[0] == "tablet" and pathList[1] == "play":
@@ -408,6 +423,12 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                 self.writeResult("OK")
             elif pathList == list(["tablet", "russia24"]):
                 httpd.playYoutube("K59KKnIbIaM")
+                self.writeResult("OK")
+            elif pathList[0] == "tablet" and pathList[1] ==  "tap":
+                httpd.adbShellCommand("input tap " + pathList[2] + " " + pathList[3])
+                self.writeResult("OK")
+            elif pathList[0] == "tablet" and pathList[1] ==  "text":
+                httpd.adbShellCommand("input text '" + urllib.parse.unquote(pathList[2]) + "'")
                 self.writeResult("OK")
             elif pathList == list(["tablet", "youtube", "stop"]):
                 httpd.adbShellCommand("am force-stop com.google.android.youtube")
