@@ -74,7 +74,10 @@
             categEl.addEventListener("change", (ev) => { 
                 updateCategory();
             }, false);
-            updateCategory();
+            try {
+                updateCategory();
+            } catch (e) {
+            }
 
 
             var selHours = document.getElementById('wakehrs');
@@ -144,6 +147,7 @@
             </div>
             <hr/>
             <div>
+                <button class='action' data-url='/tablet/radioParadise' >  RADIO PARADISE  </button>
                 <button class='action' data-url='/tablet/russia24' >  RUSSIA 24  </button>
                 <span> or video: </span>
                 <input id='youtubeChannelId' type="text" placeholder="Youtube ID"/>
