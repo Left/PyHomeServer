@@ -117,13 +117,13 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         return self.server.adbShellCommand(command)
 
     def volUp(self):
-        reportText("Громче")
+        reportText("Vol+  ")
         if httpd.getSoundVolInPercent() < 100:
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
         reportText("Vol " + str(httpd.getSoundVolInPercent()) + "%   ")
 
     def volDown(self):
-        reportText("Тише")
+        reportText("Vol-  ")
         self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
         reportText("Vol " + str(httpd.getSoundVolInPercent()) + "%   ")
 
@@ -218,23 +218,47 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         try:
             logging.info("LOADING CHANNELS")
 
-            response = urlopen("http://iptviptv.do.am/_ld/0/1_IPTV.m3u")
-            # response = urlopen("http://getsapp.ru/IPTV/Auto_IPTV.m3u")
-            html = response.read().decode("utf-8")
-            name = ""
-            url = ""
-
             self.youtubeChannels = []
-            id =  0
-            for line in html.splitlines():
-                if line.startswith("#EXTINF"):
-                    name = re.search('#EXTINF:-?\d*\,(.*)', line).group(1).strip()
-                elif line.startswith("http"):
-                    url = line
-                    lowName = name.strip().lower()
-                    self.youtubeChannels.append({ "name": name, "url": url, "cat": "all"})
-                    id = id + 1
+            id = 0
+
+            for iptvUrl in [\
+                ["1_IPTV", "http://iptviptv.do.am/_ld/0/1_IPTV.m3u"], 
+                ["Auto_IPTV", "http://getsapp.ru/IPTV/Auto_IPTV.m3u"],
+                ["400 Chan", "https://smarttvnews.ru/apps/Channels.m3u"]]:
+                try:
+                    # response = urlopen()
+                    response = urlopen(iptvUrl[1])
+                    html = response.read().decode("utf-8")
                     name = ""
+                    url = ""
+                    grp = ""
+
+                    for line in html.splitlines():
+                        if line.startswith("#EXTM3U"):
+                            pass # nothing to do
+                        elif line.strip() == '':
+                            pass # skip empty lines
+                        elif line.startswith("#EXTVLCOPT:"):
+                            pass # skip EXTVLCOPT
+                        elif line.startswith("#EXTGRP:"):
+                            grp = re.search('#EXTGRP:(.*)', line).group(1).strip()
+                        elif line.startswith("#EXTINF:"):
+                            name = re.search('#EXTINF:-?\d*\,?(.*)', line).group(1).strip()
+                        elif line.startswith("http") or line.startswith("rtmp"):
+                            url = line
+                            lowName = name.strip().lower()
+                            self.youtubeChannels.append({\
+                                "name": name,\
+                                "url": url,\
+                                "cat": iptvUrl[0] + ((" " + grp) if grp != "" else "")\
+                            })
+                            id = id + 1
+                            name = ""
+                        else:
+                            logging.error('Unparsed string: ' + line)
+                except Exception as e:
+                    traceback.print_exc()
+                    logging.info("FAILED TO LOAD CHANNELS:" + str(e))
 
             # logging.info(html)
 
