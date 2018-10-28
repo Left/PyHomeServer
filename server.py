@@ -79,7 +79,7 @@ class MiLight:
         self.on = True
         self.milightCommand(b'\xc2\x00\x55') # all white
 
-    def brightness(self, percent):
+    def changeBrightness(self, percent):
         # passed brightness is in format 0..100
         ba = bytearray(b'\x4E\x00\x55')
         ba[1] = int(0x2 + (0x15 * percent / 100))
@@ -118,11 +118,14 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
     def volUp(self):
         reportText("Громче")
-        self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
+        if httpd.getSoundVolInPercent() < 100:
+            self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
+        reportText("Vol " + str(httpd.getSoundVolInPercent()) + "%   ")
 
     def volDown(self):
         reportText("Тише")
         self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
+        reportText("Vol " + str(httpd.getSoundVolInPercent()) + "%   ")
 
     def turnRelay(self, relayComm, relay, on):       
         relayComm.send("{ \"type\": \"switch\", \"id\": \"" + str(relay) + "\", \"on\": \"" + ("true" if on else "false") + "\" }")
@@ -130,9 +133,11 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         logging.info("Turned " + ("on" if on else "off") + " relay " + str(relay) + " at " + relayComm.ip)
 
         currRelay = relayComm.relays[relay]
+        stateWasChanged = currRelay["state"] != on
         currRelay["state"] = on
 
-        reportText(currRelay["name"] + " " + (currRelay["gender"].on if on else currRelay["gender"].off) + "")
+        if stateWasChanged:
+            reportText(currRelay["name"] + " " + (currRelay["gender"].on if on else currRelay["gender"].off) + "")
 
     def switchRelay(self, relayComm, relay):
         self.turnRelay(relayComm, relay, not relayComm.relays[relay]["state"])
@@ -150,6 +155,22 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
     def stopCurrent(self):
         self.adbShellCommand("am force-stop org.videolan.vlc")
+
+    def getSoundVolInPercent(self):
+        allTheLines = self.adbShellCommand("dumpsys audio").decode("utf-8").split('- STREAM_')
+        musicLines = next(filter(lambda ll: ll.startswith('MUSIC:'), allTheLines))
+        muteCountLine = next(filter(lambda ll: ll.startswith("   Mute count:"), musicLines.splitlines()))
+        if (muteCountLine != '   Mute count: 0'):
+            return 0 # we're muted, no need to check further
+
+        currVolLine = next(filter(lambda ll: ll.startswith("   Current:"), musicLines.splitlines()))
+        allValues = currVolLine.split(', ')
+        currVol = next(filter(lambda ll: ll.startswith("2:"), allValues))
+        maxVol = next(filter(lambda ll: ll.startswith("1000:"), allValues))
+
+        retVol = int(float(currVol.split(': ')[1]) / float(maxVol.split(': ')[1]) * 100)
+        
+        return retVol
 
     def playCurrent(self):
         self.stopCurrent()
@@ -186,17 +207,17 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
                 .replace("https://", "http://")\
                 + "\" --ez force_fullscreen true")
 
+
     def playYoutube(self, youtubeId):
         self.awakeTabletIfNeeded()
         httpd.stopCurrent()
 
-        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"http://www.youtube.com/watch?v=" + youtubeId + "\" --ez force_fullscreen true")
+        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"https://www.youtube.com/watch?vq=large&v=" + youtubeId + "\" --ez force_fullscreen true")
 
     def loadM3U(self):
         try:
             logging.info("LOADING CHANNELS")
 
-            '''
             response = urlopen("http://iptviptv.do.am/_ld/0/1_IPTV.m3u")
             # response = urlopen("http://getsapp.ru/IPTV/Auto_IPTV.m3u")
             html = response.read().decode("utf-8")
@@ -204,22 +225,20 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             url = ""
 
             self.youtubeChannels = []
+            id =  0
             for line in html.splitlines():
                 if line.startswith("#EXTINF"):
                     name = re.search('#EXTINF:-?\d*\,(.*)', line).group(1).strip()
                 elif line.startswith("http"):
                     url = line
                     lowName = name.strip().lower()
-                    if not "erotic" in lowName\
-                        and not "xxx" in lowName\
-                        and not "olala" in lowName\
-                        and not "o-la-la" in lowName\
-                        and not "erox tv" in lowName\
-                        and not "playboy" in lowName:
-                    self.youtubeChannels.append({ "name": name, "url": url })
+                    self.youtubeChannels.append({ "name": name, "url": url, "cat": "all"})
+                    id = id + 1
                     name = ""
-            '''
 
+            # logging.info(html)
+
+            '''
             # response = urlopen("http://acetv.org/js/data.json?0.26020398076972606").read().decode("utf-8")
             response = urlopen("http://pomoyka.win/trash/ttv-list/as.json").read().decode("utf-8")
             # logging.info(response)
@@ -229,15 +248,16 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
             for ch in channels["channels"]:
                 self.youtubeChannels.append({ "name": ch["name"], "url": "http://192.168.121.38:8000/pid/" + ch["url"] + "/stream.mp4", "cat": ch["cat"] })
-
+            '''
             self.youtubeChannels.sort(key=lambda r:nameForCompare(r))
+
             for ch in self.youtubeChannels:
                 urlHash = bytes(hashlib.sha256(ch["url"].encode('utf-8')).digest())
                 ch["id"] = urlHash.hex()
                 if ch["id"] in self.youtubeChannelsByIds and self.youtubeChannelsByIds[ch["id"]]["url"] != ch["url"]:
                     logging.error("HASH CLASH: " + str(ch["id"]) + " " + ch["url"] + " " + self.youtubeChannelsByIds[ch["id"]]["url"]) 
                 else:
-                    self.youtubeChannelsByIds[ch["id"]] = ch
+                    self.youtubeChannelsByIds[ch["id"]] = ch            
 
             with open(os.path.dirname(os.path.abspath(__file__)) + "channels.json", "w") as write_file:
                 write_file.write(json.dumps(self.youtubeChannels))
@@ -290,6 +310,7 @@ class DeviceCommunicationChannel():
                     # let lambda process it
                     self.packetsProcessor(msg)           
             except Exception:
+                traceback.print_exc()
                 logging.info(self.ip + ": Exception for connection")
                 # traceback.print_exc()
                 pass
@@ -464,7 +485,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             httpd.switchTable()
             self.writeResult("OK")
         elif pathList == list(["tablet", "russia24"]):
-            httpd.playYoutube("K59KKnIbIaM")
+            httpd.playYoutubeURL("http://46.249.62.20:1822/play/a010")
             self.writeResult("OK")
         elif pathList == list(["tablet", "radioParadise"]):
             httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
@@ -519,7 +540,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                     httpd.turnRelay(ws, int(pathList[2]), pathList[3] == "true")
         elif pathList[0] == "light" and pathList[1] == "brightness":
             reportText("Яркость " + pathList[2] + "%")
-            milight.brightness(int(pathList[2]))
+            milight.changeBrightness(int(pathList[2]))
             self.writeResult("OK")
         elif pathList == list(["light", "off"]):
             reportText("Выключаем свет")
@@ -559,9 +580,12 @@ def clockRemoteCommands(msg):
                         milight.off()
                     else:
                         milight.allWhite()
+                if msg["key"] == "n9":
+                    reportText("Включаем Radio Paradise")
+                    httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
                 if msg["key"] == "n0":
-                    httpd.playYoutube("K59KKnIbIaM")
                     reportText("Включаем Россия 24")
+                    httpd.playYoutubeURL("http://46.249.62.20:1822/play/a010")
                 else:
                     print(msg["remote"] + " " + msg["key"])
         else:
@@ -575,6 +599,7 @@ def relayRemoteCommands(msg):
         print(msg)
 
 clockWs = DeviceCommunicationChannel("192.168.121.75", clockRemoteCommands, [])
+#clockWs = DeviceCommunicationChannel("192.168.121.131", clockRemoteCommands, [])
 relayRoom = DeviceCommunicationChannel("192.168.121.93", clockRemoteCommands, [\
     { "name": "Лампа на шкафу", "state": False, "gender": gFemale },\
     { "name": "Колонки", "state": False, "gender": gMany },\
@@ -582,7 +607,7 @@ relayRoom = DeviceCommunicationChannel("192.168.121.93", clockRemoteCommands, [\
     { "name": "Пустая релюха", "state": False, "gender": gFemale },\
 ])
 
-relayKitchen = DeviceCommunicationChannel("192.168.121.112", clockRemoteCommands, [\
+relayKitchen = DeviceCommunicationChannel("192.168.121.131", clockRemoteCommands, [\
     { "name": "Потолочная лампа на кухне", "state": False, "gender": gFemale },\
     { "name": "Лента освещения на кухне", "state": False, "gender": gFemale },\
 ])
@@ -650,7 +675,7 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                     if not httpd.isTabletAwake():
                         httpd.stopCurrent()
                         httpd.adbShellCommand("input keyevent KEYCODE_POWER")
-                    httpd.playYoutube("K59KKnIbIaM")
+                    httpd.playYoutubeURL("http://46.249.62.20:1822/play/a010")
                     httpd.wakeAt = timeToSleepNever()
 
             except Exception:
