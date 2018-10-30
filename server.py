@@ -23,7 +23,7 @@ import traceback
 import binascii
 import asyncio
 
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 from urllib.request import urlopen
 from socketserver import ThreadingMixIn
 from threading import Thread
@@ -184,6 +184,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
         return "true" in next(filter(lambda ll: 'mHoldingWakeLockSuspendBlocker=' in ll, allTheLines))
         
+    def playPause(self):
+        self.adbShellCommand("input keyevent KEYCODE_SPACE")
+
     def switchTable(self):
         self.adbShellCommand("input keyevent KEYCODE_POWER")
 
@@ -200,19 +203,38 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
     def playYoutubeURL(self, youtubeURL):
         self.awakeTabletIfNeeded()
-        httpd.stopCurrent()
 
-        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"" + youtubeURL\
-                .replace("&", "\&")\
-                .replace("https://", "http://")\
-                + "\" --ez force_fullscreen true")
+        splitUrlRes = urlparse(youtubeURL)
+        if (splitUrlRes.netloc == 'www.youtube.com'):
+            logging.info(splitUrlRes.netloc)
+            parsedQuery = urllib.parse.parse_qs(splitUrlRes.query)
+            youtubeId = parsedQuery['v'][0]
+            self.playYoutube(youtubeId)
+        else:
+            self.stopCurrent()
 
+            #'''
+            self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"" + youtubeURL\
+                    .replace("&", "\&")\
+                    .replace("https://", "http://")\
+                    + "\" --ez force_fullscreen true")
+            #'''
 
     def playYoutube(self, youtubeId):
         self.awakeTabletIfNeeded()
-        httpd.stopCurrent()
+        self.stopCurrent()
 
-        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"https://www.youtube.com/watch?vq=large&v=" + youtubeId + "\" --ez force_fullscreen true")
+        try:
+            response = urlopen("https://www.googleapis.com/youtube/v3/videos?part=id%2C+snippet&key=AIzaSyB7vgljU0x6f_Gcjd-uGP7Sb5hgKmlQwQM&id=" + youtubeId).read().decode("utf-8")
+            respJSON = json.loads(response)
+            itemsNode = respJSON["items"]
+
+            if (len(itemsNode) > 0):
+                reportText("Включаем " + itemsNode[0]["snippet"]["title"])
+        except Exception as e:
+            pass # Do nothing
+
+        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"https://www.youtube.com/watch?v=" + youtubeId + "\" --ez force_fullscreen true")
 
     def loadM3U(self):
         try:
@@ -505,6 +527,9 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             if httpd.isTabletAwake():
                 httpd.switchTable()
             self.writeResult("OK")
+        elif pathList == list(["tablet", "pause"]):
+            httpd.playPause()
+            self.writeResult("OK")
         elif pathList == list(["tablet", "onoff"]):
             httpd.switchTable()
             self.writeResult("OK")
@@ -513,6 +538,9 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("OK")
         elif pathList == list(["tablet", "radioParadise"]):
             httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
+            self.writeResult("OK")
+        elif pathList == list(["tablet", "science20"]):
+            httpd.playYoutubeURL("http://gorod.tv/s/live/414/86.169.51.136/0/0.m3u8");
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] ==  "tap":
             httpd.adbShellCommand("input tap " + pathList[2] + " " + pathList[3])
@@ -586,6 +614,8 @@ def clockRemoteCommands(msg):
                     httpd.volUp()
                 elif msg["key"] == "volume_down":
                     httpd.volDown()
+                if msg["key"] == "power":
+                    httpd.playPause()
                 if msg["key"] == "n1":
                     httpd.switchRelay(relayRoom, 0)
                 if msg["key"] == "n2":
@@ -604,6 +634,9 @@ def clockRemoteCommands(msg):
                         milight.off()
                     else:
                         milight.allWhite()
+                if msg["key"] == "n8":
+                    reportText("Включаем Наука 2.0")
+                    httpd.playYoutubeURL("http://gorod.tv/s/live/414/86.169.51.136/0/0.m3u8");
                 if msg["key"] == "n9":
                     reportText("Включаем Radio Paradise")
                     httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
