@@ -206,10 +206,14 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
         splitUrlRes = urlparse(youtubeURL)
         if (splitUrlRes.netloc == 'www.youtube.com'):
-            logging.info(splitUrlRes.netloc)
+            #logging.info(splitUrlRes.netloc)
             parsedQuery = urllib.parse.parse_qs(splitUrlRes.query)
             youtubeId = parsedQuery['v'][0]
             self.playYoutube(youtubeId)
+        elif (splitUrlRes.netloc == 'youtu.be'):
+            #logging.info(splitUrlRes.path.split('/')[1])
+            self.playYoutube(next(filter(bool, splitUrlRes.path.split('/'))))
+            # https://youtu.be/xwAKjlvSNq8
         else:
             self.stopCurrent()
 
@@ -221,16 +225,22 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             #'''
 
     def playYoutube(self, youtubeId):
+        logging.info("PLAYING " + youtubeId)
         self.awakeTabletIfNeeded()
         self.stopCurrent()
 
         try:
-            response = urlopen("https://www.googleapis.com/youtube/v3/videos?part=id%2C+snippet&key=AIzaSyB7vgljU0x6f_Gcjd-uGP7Sb5hgKmlQwQM&id=" + youtubeId).read().decode("utf-8")
+            k = "AIzaSyBTB" + "nuj6KV1TgQhg2MY" + "qZrB1EQdmS9yhuM"
+            #logging.info("https://www.googleapis.com/youtube/v3/videos?part=id%2C+snippet&key=" + k + "&id=" + youtubeId)
+            response = urlopen("https://www.googleapis.com/youtube/v3/videos?part=id%2C+snippet&key=" + k + "&id=" + youtubeId).read().decode("utf-8")
+            #logging.info(response)
             respJSON = json.loads(response)
             itemsNode = respJSON["items"]
 
             if (len(itemsNode) > 0):
                 reportText("Включаем " + itemsNode[0]["snippet"]["title"])
+
+            logging.info(itemsNode[0]["snippet"]["title"])
         except Exception as e:
             pass # Do nothing
 

@@ -47,10 +47,6 @@
                         playYoutube();
                     }
                 }, false); 
-            document.getElementById('stopYoutube').addEventListener('click', 
-                function(e) {
-                    sendReq("/tablet/youtube/stop");
-                }, false);
 
             Array.prototype.filter.call(document.getElementsByClassName('action'),
                 function(el) {
