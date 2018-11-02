@@ -127,7 +127,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
         reportText("Vol " + str(httpd.getSoundVolInPercent()) + "%   ")
 
-    def turnRelay(self, relayComm, relay, on):       
+    def turnRelay(self, relayComm, relay, on):
         relayComm.send("{ \"type\": \"switch\", \"id\": \"" + str(relay) + "\", \"on\": \"" + ("true" if on else "false") + "\" }")
 
         logging.info("Turned " + ("on" if on else "off") + " relay " + str(relay) + " at " + relayComm.ip)
@@ -187,7 +187,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     def playPause(self):
         self.adbShellCommand("input keyevent KEYCODE_SPACE")
 
-    def switchTable(self):
+    def toggleTabletPower(self):
         self.adbShellCommand("input keyevent KEYCODE_POWER")
 
     def loadM3UIfNeeded(self):
@@ -198,12 +198,21 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
     def awakeTabletIfNeeded(self):
         if not self.isTabletAwake():
-            self.switchTable()
+            self.toggleTabletPower()
         self.turnRelay(relayRoom, 1, True)
 
-    def playYoutubeURL(self, youtubeURL):
+    def playOnTablet(self, url, name):
+        reportText("Включаем " + name)
+
         self.awakeTabletIfNeeded()
 
+        self.stopCurrent()
+
+        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"" + url\
+                .replace("&", "\&")\
+                + "\" --ez force_fullscreen true")
+
+    def playYoutubeURL(self, youtubeURL):
         splitUrlRes = urlparse(youtubeURL)
         if (splitUrlRes.netloc == 'www.youtube.com'):
             #logging.info(splitUrlRes.netloc)
@@ -215,36 +224,27 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             self.playYoutube(next(filter(bool, splitUrlRes.path.split('/'))))
             # https://youtu.be/xwAKjlvSNq8
         else:
-            self.stopCurrent()
-
-            #'''
-            self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"" + youtubeURL\
-                    .replace("&", "\&")\
-                    .replace("https://", "http://")\
-                    + "\" --ez force_fullscreen true")
-            #'''
+            self.playOnTablet(youtubeURL, youtubeURL)
 
     def playYoutube(self, youtubeId):
-        logging.info("PLAYING " + youtubeId)
-        self.awakeTabletIfNeeded()
-        self.stopCurrent()
-
+        text = "Youtube video " + youtubeId
         try:
-            k = "AIzaSyBTB" + "nuj6KV1TgQhg2MY" + "qZrB1EQdmS9yhuM"
-            #logging.info("https://www.googleapis.com/youtube/v3/videos?part=id%2C+snippet&key=" + k + "&id=" + youtubeId)
+            k = "AIzaSyBTB" +\
+                "nuj6KV1TgQhg2MY" +\
+                "qZrB1EQdmS9yhuM"
+
             response = urlopen("https://www.googleapis.com/youtube/v3/videos?part=id%2C+snippet&key=" + k + "&id=" + youtubeId).read().decode("utf-8")
-            #logging.info(response)
             respJSON = json.loads(response)
             itemsNode = respJSON["items"]
 
             if (len(itemsNode) > 0):
-                reportText("Включаем " + itemsNode[0]["snippet"]["title"])
+                text = itemsNode[0]["snippet"]["title"]
 
             logging.info(itemsNode[0]["snippet"]["title"])
         except Exception as e:
             pass # Do nothing
 
-        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"https://www.youtube.com/watch?v=" + youtubeId + "\" --ez force_fullscreen true")
+        self.playOnTablet("https://www.youtube.com/watch?v=" + youtubeId, text)
 
     def loadM3U(self):
         try:
@@ -531,26 +531,26 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("OK")
         elif pathList == list(["tablet", "on"]):
             if not httpd.isTabletAwake():
-                httpd.switchTable()
+                httpd.toggleTabletPower()
             self.writeResult("OK")
         elif pathList == list(["tablet", "off"]):
             if httpd.isTabletAwake():
-                httpd.switchTable()
+                httpd.toggleTabletPower()
             self.writeResult("OK")
         elif pathList == list(["tablet", "pause"]):
             httpd.playPause()
             self.writeResult("OK")
         elif pathList == list(["tablet", "onoff"]):
-            httpd.switchTable()
+            httpd.toggleTabletPower()
             self.writeResult("OK")
         elif pathList == list(["tablet", "russia24"]):
-            httpd.playYoutubeURL("http://46.249.62.20:1822/play/a010")
+            httpd.playYoutubeURL("http://cdnmg.secure.live.rtr-vesti.ru/live/smil:r24.smil/chunklist_b1200000.m3u8")
             self.writeResult("OK")
         elif pathList == list(["tablet", "radioParadise"]):
             httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
             self.writeResult("OK")
         elif pathList == list(["tablet", "science20"]):
-            httpd.playYoutubeURL("http://gorod.tv/s/live/414/86.169.51.136/0/0.m3u8");
+            httpd.playYoutubeURL("http://ott-cdn.ucom.am/s98/index.m3u8")
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] ==  "tap":
             httpd.adbShellCommand("input tap " + pathList[2] + " " + pathList[3])
@@ -560,9 +560,6 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("OK")
         elif pathList == list(["tablet", "youtube", "stop"]):
             httpd.adbShellCommand("am force-stop com.google.android.youtube")
-            self.writeResult("OK")
-        elif pathList[0] == "tablet" and pathList[1] ==  "youtube":
-            httpd.playYoutube(pathList[2])
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] ==  "youtubeURL":
             httpd.playYoutubeURL(urllib.parse.unquote(pathList[2]))
@@ -615,10 +612,12 @@ def clockRemoteCommands(msg):
     if "type" in msg:
         if msg["type"] == "ir_key":
             now = round(time.time() * 1000)
+
+            # logging.info('Key: ' + msg["remote"] + ' ' + msg["key"] + ' ' + str(msg["timeseq"]))
             if not (msg["remote"] in last):
                 last[msg["remote"]] = 0
 
-            if now - last[msg["remote"]] > 200:
+            if now - last[msg["remote"]] > 2:
                 last[msg["remote"]] = now
                 if msg["key"] == "volume_up":
                     httpd.volUp()
@@ -639,20 +638,21 @@ def clockRemoteCommands(msg):
                 if msg["key"] == "n6":
                     httpd.switchRelay(relayKitchen, 1)
                 if msg["key"] == "n7":
-                    reportText("Включаем свет")
                     if milight.on:
+                        reportText("Выключаем свет")
                         milight.off()
                     else:
+                        reportText("Включаем свет")
                         milight.allWhite()
                 if msg["key"] == "n8":
                     reportText("Включаем Наука 2.0")
-                    httpd.playYoutubeURL("http://gorod.tv/s/live/414/86.169.51.136/0/0.m3u8");
+                    httpd.playYoutubeURL("http://ott-cdn.ucom.am/s98/index.m3u8");
                 if msg["key"] == "n9":
                     reportText("Включаем Radio Paradise")
                     httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
                 if msg["key"] == "n0":
                     reportText("Включаем Россия 24")
-                    httpd.playYoutubeURL("http://46.249.62.20:1822/play/a010")
+                    httpd.playYoutubeURL("http://cdnmg.secure.live.rtr-vesti.ru/live/smil:r24.smil/chunklist_b1200000.m3u8")
                 else:
                     print(msg["remote"] + " " + msg["key"])
         else:
@@ -725,7 +725,7 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                     httpd.turnRelay(relayKitchen, 1, False)
                     if httpd.isTabletAwake():
                         httpd.stopCurrent()
-                        httpd.adbShellCommand("input keyevent KEYCODE_POWER")
+                        httpd.toggleTabletPower()
 
                     httpd.sleepAt = timeToSleepNever()
 
@@ -740,89 +740,12 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                     httpd.turnRelay(relayRoom, 1, True)
                     if not httpd.isTabletAwake():
                         httpd.stopCurrent()
-                        httpd.adbShellCommand("input keyevent KEYCODE_POWER")
-                    httpd.playYoutubeURL("http://46.249.62.20:1822/play/a010")
+                        httpd.toggleTabletPower()
+                    httpd.playYoutubeURL("http://cdnmg.secure.live.rtr-vesti.ru/live/smil:r24.smil/chunklist_b1200000.m3u8")
                     httpd.wakeAt = timeToSleepNever()
 
             except Exception:
                 traceback.print_exc()
-
-    def aceThreadLoop():
-        @asyncio.coroutine
-        def client(loop):
-            logging.info("========== : ============")
-
-            reader, writer = yield from asyncio.open_connection('0.0.0.0', 62062, loop=loop)
-
-            logging.info("========== : ============")
-
-            writer.write(b'HELLOBG version=1\r\n')
-
-            logging.info("========== HELLOWED ============")
-
-            def readLine():
-                resp = b''
-                while not (b'\r\n' in resp):
-                    data = yield from reader.read(1)
-                    resp += data
-
-                resp = resp[0:len(resp)-2]
-
-                return resp
-
-            resp = yield from readLine()
-
-            logging.info("========== RECEIVED ============ " + resp) 
-
-            # Remove HELLOTS
-            resp = resp[len(b'HELLOTS '):]
-
-            params = dict(map(lambda x: tuple(filter(lambda f: len(f) > 0, x.split('='))), resp.decode("utf-8").split(' ')))
-            # {'version_code': '3010500', 'version': '3.1.5', 'http_port': '6878', 'key': '59c51a4a44', 'bmode': '0'}
-
-            # Ace Stream API key
-            # You probably shouldn't touch this
-            acekey = b'n51LvQoTlJzNGaFxseRK-uvnvX-sD4Vm5Axwmc4UcoD-jruxmKsuJaH0eVgE'
-
-            readyMsg = b'READY key=' + acekey.split(b'-')[0] + b'-' + \
-                            (hashlib.sha1(params["key"].encode("ascii") + acekey).hexdigest()).encode("ascii") + b'\r\n'
-
-            logging.info("Send:" + readyMsg.decode("utf-8"))
-
-            writer.write(readyMsg)
-            
-            resp = yield from readLine()
-
-            logging.info("Got:" + resp.decode("utf-8"))
-
-            writer.write(b'LOADASYNC 523 PID 826a603345a186ffe09391156d29a2d512445c48\r\n')
-
-            resp = yield from readLine()
-
-            logging.info("Got:" + resp.decode("utf-8"))
-
-            # writer.write(b'START PID 84f8cdc56625e9ea5ac73bc1a89df72872cf21a4 0\r\n')
-            writer.write(b'START PID 826a603345a186ffe09391156d29a2d512445c48 0\r\n')
-            # writer.write(b'START PID 58148f4f4dded1e0fe01b17db26b070da5985df6 0\r\n')
-
-            while True:
-                resp = yield from readLine()
-                logging.info("Got:" + resp.decode("utf-8"))
-
-                if resp.startswith(b'PLAY '):
-                    writer.write(b"DUR " + resp[len(b'PLAY'):] + b" 201964\r\n")
-                    writer.write(b"PLAYBACK " + resp[len(b'PLAY'):] + b" 0\r\n")
-                    
-
-            #print('Close the socket')
-            #writer.close()
-
-        #aceClient = AceClient("0.0.0.0", 62062)
-        #loop = asyncio.get_event_loop()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(client(loop))
-        loop.close()
 
     # Thread(target=aceThreadLoop).start()
     Thread(target=loop).start()

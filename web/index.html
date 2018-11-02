@@ -22,25 +22,14 @@
                 }, false);
 
             playYoutube = () => {
-                var chanId = document.getElementById('youtubeChannelId');
                 var urlId = document.getElementById('youtubeChannelURL');
-                if (!!chanId.value && chanId.value !== "") {
-                    sendReq("/tablet/youtube/" + chanId.value);
-                } else {
-                    sendReq("/tablet/youtubeURL/" + encodeURIComponent(urlId.value));
-                }
+                sendReq("/tablet/youtubeURL/" + encodeURIComponent(urlId.value));
             }
 
             document.getElementById('playYoutube').addEventListener('click', 
                 function(e) {
                     playYoutube();
                 }, false);
-            document.getElementById('youtubeChannelId').addEventListener('keypress',
-                function(e) {
-                    if (e.keyCode == 13) {
-                        playYoutube();
-                    }
-                }, false); 
             document.getElementById('youtubeChannelURL').addEventListener('keypress',
                 function(e) {
                     if (e.keyCode == 13) {
@@ -135,22 +124,18 @@
                 <button class='action' data-url='/tablet/onoff'    >  ( POWER )  </button>
                 <button class='action' data-url='/tablet/volup'    >   + Vol +   </button>
                 <button class='action' data-url='/tablet/voldown'  >   - Vol -   </button>
-                <button class='action' data-url='/self/reboot'     > SELF REBOOT </button>
                 <a href="/tablet_screen.html" target="_new"> Screenshot </a>
-            </div>
-            <hr/>
-            <div>
+                <br/>
                 <button class='action' data-url='/tablet/radioParadise' >  RADIO PARADISE  </button>
                 <button class='action' data-url='/tablet/russia24' >  RUSSIA 24  </button>
                 <button class='action' data-url='/tablet/science20' >  НАУКА 2.0  </button>
                 <span> or video: </span>
-                <input id='youtubeChannelId' type="text" placeholder="Youtube ID"/>
-                <span> or URL: </span>
                 <input id='youtubeChannelURL' type="text" placeholder="Youtube URL"/>
                 <button id='playYoutube'>  Play  </button>
                 <button class='action' data-url='/tablet/stop'     >     STOP    </button>
                 <button class='action' data-url='/tablet/playagain'> PLAY AGAIN  </button>
                 <button class='action' data-url='/tablet/reboot'   >    REBOOT   </button>
+                <button class='action' data-url='/self/reboot'     > ORANGE PI REBOOT </button>
             </div>
             <hr/>
             <div>
