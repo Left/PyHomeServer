@@ -614,7 +614,7 @@ last = {}
 def clockRemoteCommands(msg):
     if "type" in msg:
         if msg["type"] == "ir_key":
-            now = msg["day"] * 24 * 60 * 60 * 1000 + msg["timems"]
+            now = round(time.time() * 1000)
             if not (msg["remote"] in last):
                 last[msg["remote"]] = 0
 
@@ -666,7 +666,6 @@ def relayRemoteCommands(msg):
         print(msg)
 
 clockWs = DeviceCommunicationChannel("192.168.121.75", clockRemoteCommands, [])
-#clockWs = DeviceCommunicationChannel("192.168.121.131", clockRemoteCommands, [])
 relayRoom = DeviceCommunicationChannel("192.168.121.93", clockRemoteCommands, [\
     { "name": "Лампа на шкафу", "state": False, "gender": gFemale },\
     { "name": "Колонки", "state": False, "gender": gMany },\
