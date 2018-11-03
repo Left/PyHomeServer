@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <meta 
+        name='viewport' 
+        content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0' 
+    />
+    <script type="text/javascript">
+        function sendReq(url) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", url, true);
+            xhr.onload = function() {};
+            xhr.send(); 
+        }
+
+        window.onload = function() {
+            Array.prototype.filter.call(document.getElementsByClassName('action'),
+                function(el) {
+                    el.addEventListener("click",
+                        function() { 
+                            sendReq(el.dataset.url);
+                        },
+                        false
+                    );
+                }
+            );
+
+            var categEl = document.getElementById('categories');
+            var updateCategory = () => {
+                var category = categEl.selectedOptions[0].value;
+                Array.prototype.filter.call(document.getElementsByClassName('channel-line'),
+                    function(el) {
+                        el.style.display = el.dataset.cat === category ? "block" : "none";
+                    }, false);
+            }
+            categEl.addEventListener("change", (ev) => { 
+                updateCategory();
+            }, false);
+            try {
+                updateCategory();
+            } catch (e) {
+            }
+        }
+    </script>
+    <style>
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+        }
+
+        body table {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 100%; 
+            width: 100%
+        }
+
+        .header {
+            padding: 1em;
+        }
+
+        .channels {
+            margin: .5em;
+            overflow: scroll;
+        }
+
+        .channel-line {
+            height: 2em;
+        }
+    </style>
+</head>
+<body>
+    <table>
+        <tr><td class="header">
+            <select id='categories'>
+                    <!--{{{categories}}}-->
+            </select>
+        </td></tr>
+        <tr><td class='channels'>
+            <!--{{{channels}}}-->               
+        </td></tr>
+    </table>
+
+</body>
+
+</html>

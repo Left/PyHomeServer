@@ -41,7 +41,11 @@
                 function(el) {
                     el.addEventListener("click",
                         function() { 
-                            sendReq(el.dataset.url);
+                            if (el.dataset.action === 'go') {
+                                document.location = el.dataset.url;
+                            } else {
+                                sendReq(el.dataset.url);
+                            }
                         },
                         false
                     );
@@ -56,14 +60,6 @@
                         el.style.display = el.dataset.cat === category ? "block" : "none";
                     }, false);
             }
-            categEl.addEventListener("change", (ev) => { 
-                updateCategory();
-            }, false);
-            try {
-                updateCategory();
-            } catch (e) {
-            }
-
 
             var selHours = document.getElementById('wakehrs');
             for (var i = 0; i < 24; ++i) {
@@ -129,6 +125,7 @@
                 <button class='action' data-url='/tablet/radioParadise' >  RADIO PARADISE  </button>
                 <button class='action' data-url='/tablet/russia24' >  RUSSIA 24  </button>
                 <button class='action' data-url='/tablet/science20' >  НАУКА 2.0  </button>
+                <button class='action' data-url='/channels.html' data-action='go' >  Channels list  </button>
                 <span> or video: </span>
                 <input id='youtubeChannelURL' type="text" placeholder="Youtube URL"/>
                 <button id='playYoutube'>  Play  </button>
@@ -136,6 +133,7 @@
                 <button class='action' data-url='/tablet/playagain'> PLAY AGAIN  </button>
                 <button class='action' data-url='/tablet/reboot'   >    REBOOT   </button>
                 <button class='action' data-url='/self/reboot'     > ORANGE PI REBOOT </button>
+                <button class='action' data-url='/tablet/history/clear'     > CLEAR HISTORY </button>
             </div>
             <hr/>
             <div>
@@ -186,12 +184,9 @@
                 <button class='action' data-url='/relay/93/2/false' > LIGHT OFF </button>
             </div>
             <hr/>
-            <select id='categories'>
-                    <!--{{{categories}}}-->
-            </select>
-        </td></tr>
-        <tr><td class='channels'>
-            <!--{{{channels}}}-->               
+       </td></tr>
+        <tr><td class='history'>
+            <!--{{{history}}}-->               
         </td></tr>
     </table>
 

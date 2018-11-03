@@ -22,6 +22,7 @@ import websocket
 import traceback
 import binascii
 import asyncio
+import sys
 
 from urllib.parse import quote_plus, urlparse
 from urllib.request import urlopen
@@ -104,7 +105,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     loadedChannelsAt = 0
     youtubeChannel = ""
     youtubeChannels = []
+    youtubeHistory = []
     youtubeChannelsByIds = {}
+    youtubeChannelsByUrls = {}
 
     sleepAt = timeToSleepNever() # Sleep tablet at that time
     wakeAt = timeToSleepNever()
@@ -112,6 +115,12 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     def __init__(self, *args):
         HTTPServer.__init__(self, *args)
         self.loadM3U()
+
+        try: 
+            with open(os.path.dirname(os.path.abspath(__file__)) + "/history.json", "r") as write_file:
+                self.youtubeHistory = json.loads(write_file.read())
+        except Exception as e:
+            pass # Do nothing   
 
     def adbShellCommand(self, command):
         return self.server.adbShellCommand(command)
@@ -174,10 +183,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
     def playCurrent(self):
         self.stopCurrent()
-        logging.info(self.youtubeChannelsByIds[self.youtubeChannel]["url"])
-        self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -d \"" + 
-                self.youtubeChannelsByIds[self.youtubeChannel]["url"] + 
-                "\"")
+        
+        url = self.youtubeChannelsByIds[self.youtubeChannel]["url"]
+        self.playOnTablet(url, url)
 
     def isTabletAwake(self):
         allTheLines = self.adbShellCommand("dumpsys power").decode("utf-8").splitlines()
@@ -202,7 +210,28 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         self.turnRelay(relayRoom, 1, True)
 
     def playOnTablet(self, url, name):
+        # if name is URL, let's find it's name (if possible)
+        if name in self.youtubeChannelsByUrls:
+            name = self.youtubeChannelsByUrls[name]["name"]
+
         reportText("Включаем " + name)
+
+        existingEl = filter(lambda e: e["url"] == url, self.youtubeHistory)
+        el = next(existingEl, False)
+
+        if not el:
+            self.youtubeHistory.append({\
+                "name": name,\
+                "url": url,\
+                "cat": "history"})
+        else:
+            self.youtubeHistory.remove(el)
+            self.youtubeHistory.append(el)
+
+        with open(os.path.dirname(os.path.abspath(__file__)) + "/history.json", "w") as write_file:
+            write_file.write(json.dumps(self.youtubeHistory))
+
+        # logging.info(json.dumps(self.youtubeHistory))
 
         self.awakeTabletIfNeeded()
 
@@ -239,8 +268,6 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
             if (len(itemsNode) > 0):
                 text = itemsNode[0]["snippet"]["title"]
-
-            logging.info(itemsNode[0]["snippet"]["title"])
         except Exception as e:
             pass # Do nothing
 
@@ -313,7 +340,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
                 if ch["id"] in self.youtubeChannelsByIds and self.youtubeChannelsByIds[ch["id"]]["url"] != ch["url"]:
                     logging.error("HASH CLASH: " + str(ch["id"]) + " " + ch["url"] + " " + self.youtubeChannelsByIds[ch["id"]]["url"]) 
                 else:
-                    self.youtubeChannelsByIds[ch["id"]] = ch            
+                    self.youtubeChannelsByIds[ch["id"]] = ch
+                # 
+                self.youtubeChannelsByUrls[ch["url"]] = ch
 
             with open(os.path.dirname(os.path.abspath(__file__)) + "channels.json", "w") as write_file:
                 write_file.write(json.dumps(self.youtubeChannels))
@@ -450,6 +479,20 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             # Channels
             htmlContent = htmlContent.replace("<!--{{{channels}}}-->", strr)
 
+            strHistory = ""
+            for ytb in reversed(self.server.youtubeHistory):
+                thisname = ytb["name"]
+                if ytb["url"] in self.server.youtubeChannelsByUrls:
+                    thisname = self.server.youtubeChannelsByUrls[ytb["url"]]["name"]
+
+                btns = "<button class='action' data-url='/tablet/youtubeURL/" \
+                    + urllib.parse.quote(ytb["url"], safe='') + "'  data-uri='"\
+                    + ytb["url"] + "' data-name='" + thisname + "'>[    Play    ]</button>" + "\n"
+
+                strHistory += "<div class='channel-line' data-cat='" + ytb["cat"] + "'>" + thisname + "&nbsp;" + btns + "</div>" + "\n"
+
+            htmlContent = htmlContent.replace('<!--{{{history}}}-->', strHistory)
+
             self.wfile.write(htmlContent.encode('utf-8'))
         elif pathList == list(["favicon.ico"]):
             self.send_response(200)
@@ -511,8 +554,6 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         elif pathList[0] == "tablet" and pathList[1] == "play":
             if (len(pathList) > 2):
                 self.server.youtubeChannel = pathList[2]
-                ytb = self.server.youtubeChannelsByIds[self.server.youtubeChannel]
-                reportText("Включаем " + ytb["name"])
                 
             httpd.playCurrent()
             self.writeResult("OK")
@@ -566,6 +607,12 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("OK")
         elif pathList == list(["tablet", "reboot"]):
             httpd.adbShellCommand("reboot")
+            self.writeResult("OK")
+        elif pathList == list(["tablet", "history", "clear"]):
+            httpd.youtubeHistory = []
+            with open(os.path.dirname(os.path.abspath(__file__)) + "/history.json", "w") as write_file:
+                write_file.write(json.dumps(httpd.youtubeHistory))
+
             self.writeResult("OK")
         elif pathList == list(["self", "reboot"]):
             subprocess.Popen("reboot", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read() # Reboot self
@@ -749,7 +796,7 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
 
     # Thread(target=aceThreadLoop).start()
     Thread(target=loop).start()
-    
+   
     # Start all web communications
     for ws in allWs:
         ws.start()
