@@ -10,7 +10,12 @@
         function sendReq(url) {
             var xhr = new XMLHttpRequest();
             xhr.open("POST", url, true);
-            xhr.onload = function() {};
+            xhr.onload = function() {
+                const respJSON = JSON.parse(xhr.responseText);
+                if ('reload' in respJSON && respJSON['reload']) {
+                    document.location.reload();
+                }
+            };
             xhr.send(); 
         }
 
@@ -51,6 +56,17 @@
                     );
                 }
             );
+
+            Array.prototype.filter.call(document.getElementsByClassName('channelSelect'),
+                function(el) {
+                    el.addEventListener("change", (ev) => { 
+                        sendReq("/tablet/history/setchannel/" +
+                            el.dataset.url + "/" +
+                            el.selectedOptions[0].value);
+                    }, false);
+                }
+            );
+
 
             var categEl = document.getElementById('categories');
             var updateCategory = () => {
@@ -122,9 +138,6 @@
                 <button class='action' data-url='/tablet/voldown'  >   - Vol -   </button>
                 <a href="/tablet_screen.html" target="_new"> Screenshot </a>
                 <br/>
-                <button class='action' data-url='/tablet/radioParadise' >  RADIO PARADISE  </button>
-                <button class='action' data-url='/tablet/russia24' >  RUSSIA 24  </button>
-                <button class='action' data-url='/tablet/science20' >  НАУКА 2.0  </button>
                 <button class='action' data-url='/channels.html' data-action='go' >  Channels list  </button>
                 <span> or video: </span>
                 <input id='youtubeChannelURL' type="text" placeholder="Youtube URL"/>
@@ -133,7 +146,9 @@
                 <button class='action' data-url='/tablet/playagain'> PLAY AGAIN  </button>
                 <button class='action' data-url='/tablet/reboot'   >    REBOOT   </button>
                 <button class='action' data-url='/self/reboot'     > ORANGE PI REBOOT </button>
+                <!--
                 <button class='action' data-url='/tablet/history/clear'     > CLEAR HISTORY </button>
+                -->
             </div>
             <hr/>
             <div>

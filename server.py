@@ -209,6 +209,11 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             self.toggleTabletPower()
         self.turnRelay(relayRoom, 1, True)
 
+    def saveYoutubeHistory(self):
+        with open(os.path.dirname(os.path.abspath(__file__)) + "/history.json", "w") as write_file:
+            write_file.write(json.dumps(self.youtubeHistory))
+
+
     def playOnTablet(self, url, name):
         # if name is URL, let's find it's name (if possible)
         if name in self.youtubeChannelsByUrls:
@@ -220,6 +225,10 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         el = next(existingEl, False)
 
         if not el:
+            if len(self.youtubeHistory) > 40:
+                # remove first with no "channel" assigned
+                self.youtubeHistory.remove(next(filter(lambda x: not "channel" in x, self.youtubeHistory)))
+
             self.youtubeHistory.append({\
                 "name": name,\
                 "url": url,\
@@ -228,8 +237,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             self.youtubeHistory.remove(el)
             self.youtubeHistory.append(el)
 
-        with open(os.path.dirname(os.path.abspath(__file__)) + "/history.json", "w") as write_file:
-            write_file.write(json.dumps(self.youtubeHistory))
+        self.saveYoutubeHistory()
 
         # logging.info(json.dumps(self.youtubeHistory))
 
@@ -282,7 +290,10 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
             for iptvUrl in [\
                 ["1_IPTV", "http://iptviptv.do.am/_ld/0/1_IPTV.m3u"], 
+                # ["4_VLC", "http://iptviptv.do.am/_ld/0/4_VLC.m3u"],
+                ["Films", "http://iptviptv.do.am/_ld/0/3_Film.m3u"],
                 ["Auto_IPTV", "http://getsapp.ru/IPTV/Auto_IPTV.m3u"],
+                ["Auto_nogpr", "https://webarmen.com/my/iptv/auto.nogrp.m3u"],
                 ["400 Chan", "https://smarttvnews.ru/apps/Channels.m3u"]]:
                 try:
                     # response = urlopen()
@@ -303,6 +314,8 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
                             grp = re.search('#EXTGRP:(.*)', line).group(1).strip()
                         elif line.startswith("#EXTINF:"):
                             name = re.search('#EXTINF:-?\d*\,?(.*)', line).group(1).strip()
+                            name = re.sub(r"([a-z\-]*=\"[^\"]*\")", r"", name).strip()
+                            name = re.sub(r"^(\,)", r"", name)
                         elif line.startswith("http") or line.startswith("rtmp"):
                             url = line
                             lowName = name.strip().lower()
@@ -319,6 +332,12 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
                     traceback.print_exc()
                     logging.info("FAILED TO LOAD CHANNELS:" + str(e))
 
+            self.youtubeChannels.append({\
+                    "name": 'Radio Paradise',\
+                    "url": 'https://www.radioparadise.com/m3u/mp3-192.m3u',\
+                    "cat": "Z: built-in"\
+                })
+            
             # logging.info(html)
 
             '''
@@ -417,11 +436,11 @@ class DeviceCommunicationChannel():
             logging.info(self.ip + ": Web socket is closed")
 
 class HomeHTTPHandler(BaseHTTPRequestHandler):
-    def writeResult(self, res):
+    def writeResult(self, res, reload=False):
         self.send_response(200)
         self.send_header('Content-type', 'application/json;charset=utf-8')
         self.end_headers()
-        self.wfile.write(("{ \"result\": \"" + res + "\"}").encode('utf-8'))
+        self.wfile.write(("{ \"result\": \"" + res + "\", \"reload\": " + ("true" if reload else "false") + " }").encode('utf-8'))
 
     def doInSafe(self, lam):
         try:
@@ -485,11 +504,21 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                 if ytb["url"] in self.server.youtubeChannelsByUrls:
                     thisname = self.server.youtubeChannelsByUrls[ytb["url"]]["name"]
 
-                btns = "<button class='action' data-url='/tablet/youtubeURL/" \
-                    + urllib.parse.quote(ytb["url"], safe='') + "'  data-uri='"\
-                    + ytb["url"] + "' data-name='" + thisname + "'>[    Play    ]</button>" + "\n"
+                encodedURL = urllib.parse.quote(ytb["url"], safe='')
 
-                strHistory += "<div class='channel-line' data-cat='" + ytb["cat"] + "'>" + thisname + "&nbsp;" + btns + "</div>" + "\n"
+                strHistory += "<div class='channel-line' data-cat='" + ytb["cat"] + "'>" + thisname + "&nbsp;" + \
+                    "<button class='action' data-url='/tablet/youtubeURL/" \
+                        + encodedURL + "'  data-uri='"\
+                        + ytb["url"] + "' data-name='" + thisname + "'>[    Play    ]</button>" + "\n"\
+                    "<select class='channelSelect' data-url='" + encodedURL + "'>" + \
+                        "<option value=''" + ("selected" if not ("channel" in ytb) else "") + ">   </option>" +\
+                        " ".join(map(lambda x: \
+                            "<option value='" + str(x) + "'" + ("selected" if ("channel" in ytb and ytb["channel"] == x) else "") + ">" + str(x) + "</option>",\
+                            [x for x in range(10, 30)])) +\
+                    "</select>" + "\n"\
+                    "<button class='action' data-url='/tablet/history/remove/" \
+                        + encodedURL + "' >[  Remove ]</button>" + "\n"\
+                    + "</div>" + "\n"
 
             htmlContent = htmlContent.replace('<!--{{{history}}}-->', strHistory)
 
@@ -608,12 +637,26 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         elif pathList == list(["tablet", "reboot"]):
             httpd.adbShellCommand("reboot")
             self.writeResult("OK")
-        elif pathList == list(["tablet", "history", "clear"]):
-            httpd.youtubeHistory = []
-            with open(os.path.dirname(os.path.abspath(__file__)) + "/history.json", "w") as write_file:
-                write_file.write(json.dumps(httpd.youtubeHistory))
+        elif pathList[0] == "tablet" and pathList[1] == "history":
+            youtb = None
+            if len(pathList) >= 4:
+                decodedUrl = urllib.parse.unquote(pathList[3])
+                youtb = next(filter(lambda ytb: ytb["url"] == decodedUrl, httpd.youtubeHistory))
 
-            self.writeResult("OK")
+            if pathList[2] == "setchannel":
+                channel = int(pathList[4])
+                youtb["channel"] = channel
+            elif pathList[2] == "remove":
+                decodedUrl = urllib.parse.unquote(pathList[3])
+                logging.info('Removing ' + str(youtb))
+                httpd.youtubeHistory.remove(youtb)
+            elif pathList[2] == "clear":
+                httpd.youtubeHistory = []
+            else:
+                pass
+
+            httpd.saveYoutubeHistory()
+            self.writeResult("OK", True)
         elif pathList == list(["self", "reboot"]):
             subprocess.Popen("reboot", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read() # Reboot self
             self.writeResult("OK")
@@ -654,54 +697,76 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             self.writeResult("OK")
 
 last = {}
+prevKey = {}
+
+def isNumKey(k):
+    return len(k) == 2 and k[0] == "n" and k[1] >= '0' and k[1] <= '9'
 
 def clockRemoteCommands(msg):
     if "type" in msg:
         if msg["type"] == "ir_key":
-            now = round(time.time() * 1000)
+            now = time.time()
 
             # logging.info('Key: ' + msg["remote"] + ' ' + msg["key"] + ' ' + str(msg["timeseq"]))
             if not (msg["remote"] in last):
                 last[msg["remote"]] = 0
+            if not (msg["remote"] in prevKey):
+                prevKey[msg["remote"]] = ""
 
-            if now - last[msg["remote"]] > 2:
-                last[msg["remote"]] = now
-                if msg["key"] == "volume_up":
+            if now - last[msg["remote"]] > 0:
+                k = msg["key"]
+
+                if k == "volume_up":
                     httpd.volUp()
-                elif msg["key"] == "volume_down":
+                elif k == "volume_down":
                     httpd.volDown()
-                if msg["key"] == "power":
+                elif k == "power":
                     httpd.playPause()
-                if msg["key"] == "n1":
-                    httpd.switchRelay(relayRoom, 0)
-                if msg["key"] == "n2":
-                    httpd.switchRelay(relayRoom, 1)
-                if msg["key"] == "n3":
-                    httpd.switchRelay(relayRoom, 2)
-                if msg["key"] == "n4":
-                    httpd.switchRelay(relayRoom, 3)
-                if msg["key"] == "n5":
-                    httpd.switchRelay(relayKitchen, 0)
-                if msg["key"] == "n6":
-                    httpd.switchRelay(relayKitchen, 1)
-                if msg["key"] == "n7":
-                    if milight.on:
-                        reportText("Выключаем свет")
-                        milight.off()
+                elif isNumKey(k) and isNumKey(prevKey[msg["remote"]]) and (now - last[msg["remote"]] < 2):
+                    # number !
+                    n = int(k[1]) + 10*int(prevKey[msg["remote"]][1])
+                    logging.info("$$$>>>" + str(n))
+
+                    ytb = next(filter(lambda x: "channel" in x and x["channel"] == n, httpd.youtubeHistory), None)
+                    if ytb != None:
+                        httpd.playYoutubeURL(ytb["url"])
                     else:
-                        reportText("Включаем свет")
-                        milight.allWhite()
-                if msg["key"] == "n8":
+                        if n == 1:
+                            httpd.switchRelay(relayRoom, 0)
+                        elif n == 2:
+                            httpd.switchRelay(relayRoom, 1)
+                        elif n == 3:
+                            httpd.switchRelay(relayRoom, 2)
+                        elif n == 4:
+                            httpd.switchRelay(relayRoom, 3)
+                        elif n == 5:
+                            httpd.switchRelay(relayKitchen, 0)
+                        elif n == 6:
+                            httpd.switchRelay(relayKitchen, 1)
+                        elif n == 7:
+                            if milight.on:
+                                reportText("Выключаем свет")
+                                milight.off()
+                            else:
+                                reportText("Включаем свет")
+                                milight.allWhite()
+                    '''
+                el
+                elif k == "n8":
                     reportText("Включаем Наука 2.0")
                     httpd.playYoutubeURL("http://ott-cdn.ucom.am/s98/index.m3u8");
-                if msg["key"] == "n9":
+                elif k == "n9":
                     reportText("Включаем Radio Paradise")
                     httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
-                if msg["key"] == "n0":
+                elif k == "n0":
                     reportText("Включаем Россия 24")
                     httpd.playYoutubeURL("http://cdnmg.secure.live.rtr-vesti.ru/live/smil:r24.smil/chunklist_b1200000.m3u8")
+                '''
                 else:
-                    print(msg["remote"] + " " + msg["key"])
+                    print(msg["remote"] + " " + k)
+
+                prevKey[msg["remote"]] = k
+                last[msg["remote"]] = now
         else:
             print("Unrecognized type:" + msg["type"])
     #elif "result" in msg:
