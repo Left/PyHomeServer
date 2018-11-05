@@ -23,6 +23,7 @@ import traceback
 import binascii
 import asyncio
 import sys
+import copy 
 
 from urllib.parse import quote_plus, urlparse
 from urllib.request import urlopen
@@ -109,6 +110,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     youtubeChannelsByIds = {}
     youtubeChannelsByUrls = {}
 
+    settings = {}
     sleepAt = timeToSleepNever() # Sleep tablet at that time
     wakeAt = timeToSleepNever()
 
@@ -119,6 +121,11 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         try: 
             with open(os.path.dirname(os.path.abspath(__file__)) + "/history.json", "r") as write_file:
                 self.youtubeHistory = json.loads(write_file.read())
+
+            with open(os.path.dirname(os.path.abspath(__file__)) + "/settings.json", "r") as write_file:
+                self.settings = json.loads(write_file.read())
+                self.sleepAt = self.settings["sleepAt"] if "sleepAt" in self.settings else timeToSleepNever()
+                self.wakeAt = self.settings["wakeAt"] if "wakeAt" in self.settings else timeToSleepNever()
         except Exception as e:
             pass # Do nothing   
 
@@ -213,6 +220,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         with open(os.path.dirname(os.path.abspath(__file__)) + "/history.json", "w") as write_file:
             write_file.write(json.dumps(self.youtubeHistory))
 
+    def saveSettings(self):
+        with open(os.path.dirname(os.path.abspath(__file__)) + "/settings.json", "w") as write_file:
+            write_file.write(json.dumps(self.settings))
 
     def playOnTablet(self, url, name):
         # if name is URL, let's find it's name (if possible)
@@ -248,6 +258,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"" + url\
                 .replace("&", "\&")\
                 + "\" --ez force_fullscreen true")
+
+    def getByChannelOrNone(self, n):
+        return next(filter(lambda x: "channel" in x and x["channel"] == n, httpd.youtubeHistory), None)
 
     def playYoutubeURL(self, youtubeURL):
         splitUrlRes = urlparse(youtubeURL)
@@ -335,6 +348,11 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             self.youtubeChannels.append({\
                     "name": 'Radio Paradise',\
                     "url": 'https://www.radioparadise.com/m3u/mp3-192.m3u',\
+                    "cat": "Z: built-in"\
+                })
+            self.youtubeChannels.append({\
+                    "name": 'Пикник на 101',\
+                    "url": 'http://ic5.101.ru:8000/a157?userid=0&setst=e5l2bv8j2v1jsagt3rtc3teoq8&tok=07790631dkVJeVFPUWNKdjRGRFp2d0tySWJST3JWQy8yVnphbHVTL3R3QmJJeEZ1WjEvY3ViV3RtUjJrZ3UrVWFualdDVA%3D%3D2',\
                     "cat": "Z: built-in"\
                 })
             
@@ -498,6 +516,12 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             # Channels
             htmlContent = htmlContent.replace("<!--{{{channels}}}-->", strr)
 
+            # Server settings
+            htmlContent = htmlContent.replace("/*{{{serverSettings}}}*/", json.dumps({\
+                    "sleepAt": datetime.datetime.fromtimestamp(httpd.sleepAt).isoformat(),\
+                    "wakeAt": datetime.datetime.fromtimestamp(httpd.wakeAt).isoformat(),\
+                }))
+
             strHistory = ""
             for ytb in reversed(self.server.youtubeHistory):
                 thisname = ytb["name"]
@@ -613,15 +637,6 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         elif pathList == list(["tablet", "onoff"]):
             httpd.toggleTabletPower()
             self.writeResult("OK")
-        elif pathList == list(["tablet", "russia24"]):
-            httpd.playYoutubeURL("http://cdnmg.secure.live.rtr-vesti.ru/live/smil:r24.smil/chunklist_b1200000.m3u8")
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "radioParadise"]):
-            httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
-            self.writeResult("OK")
-        elif pathList == list(["tablet", "science20"]):
-            httpd.playYoutubeURL("http://ott-cdn.ucom.am/s98/index.m3u8")
-            self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] ==  "tap":
             httpd.adbShellCommand("input tap " + pathList[2] + " " + pathList[3])
             self.writeResult("OK")
@@ -648,8 +663,8 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                 youtb["channel"] = channel
             elif pathList[2] == "remove":
                 decodedUrl = urllib.parse.unquote(pathList[3])
-                logging.info('Removing ' + str(youtb))
-                httpd.youtubeHistory.remove(youtb)
+                if not ("channel" in youtb) or youtb["channel"] != 0:
+                    httpd.youtubeHistory.remove(youtb)
             elif pathList[2] == "clear":
                 httpd.youtubeHistory = []
             else:
@@ -661,7 +676,8 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             subprocess.Popen("reboot", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stderr.read() # Reboot self
             self.writeResult("OK")
         elif pathList[0] == "tablet" and pathList[1] == "sleepin":
-            self.server.sleepAt = time.time() + int(pathList[2])
+            httpd.settings["sleepAt"] = httpd.sleepAt = time.time() + int(pathList[2])
+            httpd.saveSettings()
 
             reportText("Телевизор выключится через " + timeBefore(httpd.sleepAt))
 
@@ -676,6 +692,8 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             else:
                 #today
                 httpd.wakeAt = time.time() + ((hrs - now.hour)*60 + (mins - now.minute))*60
+            httpd.settings["wakeAt"] = httpd.wakeAt
+            httpd.saveSettings()
             reportText("Телевизор включится через " + timeBefore(httpd.wakeAt))
 
             self.writeResult("OK")
@@ -725,9 +743,9 @@ def clockRemoteCommands(msg):
                 elif isNumKey(k) and isNumKey(prevKey[msg["remote"]]) and (now - last[msg["remote"]] < 2):
                     # number !
                     n = int(k[1]) + 10*int(prevKey[msg["remote"]][1])
-                    logging.info("$$$>>>" + str(n))
+                    # logging.info("$$$>>>" + str(n))
 
-                    ytb = next(filter(lambda x: "channel" in x and x["channel"] == n, httpd.youtubeHistory), None)
+                    ytb = httpd.getByChannelOrNone(n)
                     if ytb != None:
                         httpd.playYoutubeURL(ytb["url"])
                     else:
@@ -839,7 +857,8 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                         httpd.stopCurrent()
                         httpd.toggleTabletPower()
 
-                    httpd.sleepAt = timeToSleepNever()
+                    httpd.settings["sleepAt"] = httpd.sleepAt = timeToSleepNever()
+                    httpd.saveSettings()
 
                 # logging.info("Time: " + str(time.time()) + " " + str(httpd.wakeAt))
 
@@ -853,9 +872,11 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                     if not httpd.isTabletAwake():
                         httpd.stopCurrent()
                         httpd.toggleTabletPower()
-                    httpd.playYoutubeURL("http://cdnmg.secure.live.rtr-vesti.ru/live/smil:r24.smil/chunklist_b1200000.m3u8")
-                    httpd.wakeAt = timeToSleepNever()
-
+                    ytb = httpd.getByChannelOrNone(29)
+                    if ytb != None:
+                        httpd.playYoutubeURL(ytb["url"])
+                    httpd.settings["wakeAt"] = httpd.wakeAt = timeToSleepNever()
+                    httpd.saveSettings()
             except Exception:
                 traceback.print_exc()
 
