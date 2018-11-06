@@ -518,11 +518,16 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
 
             # Server settings
             htmlContent = htmlContent.replace("/*{{{serverSettings}}}*/", json.dumps({\
-                    "sleepAt": datetime.datetime.fromtimestamp(httpd.sleepAt).isoformat(),\
-                    "wakeAt": datetime.datetime.fromtimestamp(httpd.wakeAt).isoformat(),\
+                    # "sleepAt": datetime.datetime.fromtimestamp(httpd.sleepAt).isoformat(),\
+                    # "wakeAt": datetime.datetime.fromtimestamp(httpd.wakeAt).isoformat(),\
                 }))
 
             strHistory = ""
+            channelsUsed = set()
+            for ytb in self.server.youtubeHistory:
+                if "channel" in ytb:
+                    channelsUsed.add(ytb["channel"])
+
             for ytb in reversed(self.server.youtubeHistory):
                 thisname = ytb["name"]
                 if ytb["url"] in self.server.youtubeChannelsByUrls:
@@ -530,19 +535,25 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
 
                 encodedURL = urllib.parse.quote(ytb["url"], safe='')
 
-                strHistory += "<div class='channel-line' data-cat='" + ytb["cat"] + "'>" + thisname + "&nbsp;" + \
-                    "<button class='action' data-url='/tablet/youtubeURL/" \
-                        + encodedURL + "'  data-uri='"\
-                        + ytb["url"] + "' data-name='" + thisname + "'>[    Play    ]</button>" + "\n"\
+                def optionText(x):
+                    sel = "channel" in ytb and ytb["channel"] == x
+                    return "<option value='" + str(x) + "'" +\
+                                ("selected" if sel else "") + " " +\
+                                ("disabled" if not sel and x in channelsUsed else "") +\
+                                ">" + str(x) + "</option>"
+
+                strHistory += "<div class='channel-line' data-cat='" + ytb["cat"] + "'>" +\
                     "<select class='channelSelect' data-url='" + encodedURL + "'>" + \
                         "<option value=''" + ("selected" if not ("channel" in ytb) else "") + ">   </option>" +\
-                        " ".join(map(lambda x: \
-                            "<option value='" + str(x) + "'" + ("selected" if ("channel" in ytb and ytb["channel"] == x) else "") + ">" + str(x) + "</option>",\
-                            [x for x in range(10, 30)])) +\
-                    "</select>" + "\n"\
-                    "<button class='action' data-url='/tablet/history/remove/" \
-                        + encodedURL + "' >[  Remove ]</button>" + "\n"\
-                    + "</div>" + "\n"
+                        "\n".join(map(optionText, [x for x in range(10, 30)])) +\
+                    "</select>" + "\n" +\
+                     thisname + "&nbsp;" + \
+                    "<button class='action' data-url='/tablet/youtubeURL/" \
+                        + encodedURL + "'  data-uri='"\
+                        + ytb["url"] + "' data-name='" + thisname + "'>[    Play    ]</button>" + "\n" +\
+                    "<button class='action' data-url='/tablet/history/remove/" +\
+                    encodedURL + "' >[  Remove ]</button>" + "\n"\
+                    "</div>" + "\n"
 
             htmlContent = htmlContent.replace('<!--{{{history}}}-->', strHistory)
 
