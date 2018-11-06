@@ -233,7 +233,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         if name in self.youtubeChannelsByUrls:
             name = self.youtubeChannelsByUrls[name]["name"]
 
-        reportText("Включаем " + name)
+        reportText("+ " + name)
 
         existingEl = filter(lambda e: e["url"] == url, self.youtubeHistory)
         el = next(existingEl, False)
@@ -806,18 +806,6 @@ def clockRemoteCommands(msg):
                             else:
                                 reportText("Включаем свет")
                                 milight.allWhite()
-                    '''
-                el
-                elif k == "n8":
-                    reportText("Включаем Наука 2.0")
-                    httpd.playYoutubeURL("http://ott-cdn.ucom.am/s98/index.m3u8");
-                elif k == "n9":
-                    reportText("Включаем Radio Paradise")
-                    httpd.playYoutubeURL("https://www.radioparadise.com/m3u/mp3-192.m3u")
-                elif k == "n0":
-                    reportText("Включаем Россия 24")
-                    httpd.playYoutubeURL("http://cdnmg.secure.live.rtr-vesti.ru/live/smil:r24.smil/chunklist_b1200000.m3u8")
-                '''
                 else:
                     print(msg["remote"] + " " + k)
 
