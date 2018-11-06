@@ -114,6 +114,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     sleepAt = timeToSleepNever() # Sleep tablet at that time
     wakeAt = timeToSleepNever()
 
+    # this URL is currently playing
+    nowPlayingUrl = None
+
     def __init__(self, *args):
         HTTPServer.__init__(self, *args)
         self.loadM3U()
@@ -170,6 +173,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         return resultOut
 
     def stopCurrent(self):
+        self.nowPlayingUrl = None
         self.adbShellCommand("am force-stop org.videolan.vlc")
 
     def getSoundVolInPercent(self):
@@ -255,12 +259,17 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
 
         self.stopCurrent()
 
+        self.nowPlayingUrl = url
+
         self.adbShellCommand("am start -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -a android.intent.action.VIEW -d \"" + url\
                 .replace("&", "\&")\
                 + "\" --ez force_fullscreen true")
 
     def getByChannelOrNone(self, n):
         return next(filter(lambda x: "channel" in x and x["channel"] == n, httpd.youtubeHistory), None)
+
+    def getHistoryByUrlOrNone(self, url):
+        return next(filter(lambda x: "url" in x and x["url"] == url, httpd.youtubeHistory), None)
 
     def playYoutubeURL(self, youtubeURL):
         splitUrlRes = urlparse(youtubeURL)
@@ -752,6 +761,21 @@ def clockRemoteCommands(msg):
                     httpd.volUp()
                 elif k == "volume_down":
                     httpd.volDown()
+                elif k == "channel_up" or k == "channel_down":
+                    historyItem = httpd.getHistoryByUrlOrNone(httpd.nowPlayingUrl)
+                    chan = 0
+                    if (historyItem != None and "channel" in historyItem):
+                        chan = historyItem["channel"]
+                    while True:
+                        chan = (chan + 100) % 100
+                        if k == "channel_up":
+                            chan = chan + 1
+                        else:
+                            chan = chan - 1
+                        channelFound = httpd.getByChannelOrNone(chan)
+                        if channelFound != None:
+                            httpd.playOnTablet(channelFound["url"], channelFound["name"])
+                            break
                 elif k == "power":
                     httpd.playPause()
                 elif isNumKey(k) and isNumKey(prevKey[msg["remote"]]) and (now - last[msg["remote"]] < 2):
