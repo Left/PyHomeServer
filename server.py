@@ -544,7 +544,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
 
                 strHistory += "<div class='channel-line' data-cat='" + ytb["cat"] + "'>" +\
                     "<select class='channelSelect' data-url='" + encodedURL + "'>" + \
-                        "<option value=''" + ("selected" if not ("channel" in ytb) else "") + ">   </option>" +\
+                        "<option value='0' " + ("selected" if not ("channel" in ytb) else "") + ">   </option>" +\
                         "\n".join(map(optionText, [x for x in range(10, 30)])) +\
                     "</select>" + "\n" +\
                      thisname + "&nbsp;" + \
@@ -671,7 +671,10 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
 
             if pathList[2] == "setchannel":
                 channel = int(pathList[4])
-                youtb["channel"] = channel
+                if channel == 0:
+                    del youtb["channel"]
+                else:
+                    youtb["channel"] = channel
             elif pathList[2] == "remove":
                 decodedUrl = urllib.parse.unquote(pathList[3])
                 if not ("channel" in youtb) or youtb["channel"] != 0:
