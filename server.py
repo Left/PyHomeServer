@@ -895,6 +895,8 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                     httpd.turnRelay(relayRoom, 0, True)
                     time.sleep(1)
                     httpd.turnRelay(relayRoom, 1, True)
+                    time.sleep(1)
+                    httpd.turnRelay(relayKitchen, 1, True)
                     if not httpd.isTabletAwake():
                         httpd.stopCurrent()
                         httpd.toggleTabletPower()
