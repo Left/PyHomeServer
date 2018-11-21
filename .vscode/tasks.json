@@ -8,6 +8,12 @@
             "type": "shell",
             "command": "scp -r * root@192.168.121.38:/root/home ; ssh root@192.168.121.38 'sudo systemctl restart homeserv.service'; echo Done",
             "problemMatcher": []
+        },
+        {
+            "label": "deploy (without restart)",
+            "type": "shell",
+            "command": "scp -r * root@192.168.121.38:/root/home ; echo Done",
+            "problemMatcher": []
         }
     ]
 }

@@ -3,18 +3,22 @@
 <head>
     <meta http-equiv="content-type" content="text/html; charset=UTF-8">
     <script type="text/javascript">
-        function sendReq(url) {
+        function sendReq(url, resFn) {
             var xhr = new XMLHttpRequest();
             xhr.open("POST", url, true);
-            xhr.onload = function() {};
+            xhr.onload = function() { 
+                if (resFn) {
+                    resFn(xhr.responseText);
+                } 
+            };
             xhr.send(); 
         }
 
         window.onload = function() {
             var scr = document.getElementById('mainScr');
             scr.onclick = (e) => {
-                // console.log(e.offsetX + "  " + e.offsetY);
-                sendReq("tablet/tap/" + e.offsetX + "/" + e.offsetY);
+                console.log(e);
+                sendReq("tablet/tap/" + e.clientX + "/" + e.clientY);
                 setTimeout(() => scr.src = 'tablet/screen?t=' + new Date().getTime(), 1000);
             }
 
@@ -23,6 +27,19 @@
                 sendReq("tablet/text/" + encodeURIComponent(e.key));
             }
 
+            setInterval(() => {
+                sendReq("tablet/screen/orientation", txt => {
+                    var ress = JSON.parse(txt);
+                    switch(+ress.result) {
+                        case 1:
+                            break;
+                        case 3:
+                            // Rotate 180
+                            scr.style = "transform: rotate(180deg);";
+                            break;
+                    }
+                })
+            }, 2000);
             setInterval(() => scr.src = 'tablet/screen?t=' + new Date().getTime(), 4000);
         };
     </script>

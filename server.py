@@ -311,7 +311,8 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
             id = 0
 
             for iptvUrl in [\
-                ["1_IPTV", "http://iptviptv.do.am/_ld/0/1_IPTV.m3u"], 
+                ["1_IPTV", "http://iptviptv.do.am/_ld/0/1_IPTV.m3u"],
+                ["Tritel", "http://tritel.net.ru/cp/files/Tritel-IPTV.m3u"],
                 # ["4_VLC", "http://iptviptv.do.am/_ld/0/4_VLC.m3u"],
                 ["Films", "http://iptviptv.do.am/_ld/0/3_Film.m3u"],
                 ["Auto_IPTV", "http://getsapp.ru/IPTV/Auto_IPTV.m3u"],
@@ -554,12 +555,12 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                 strHistory += "<div class='channel-line' data-cat='" + ytb["cat"] + "'>" +\
                     "<select class='channelSelect' data-url='" + encodedURL + "'>" + \
                         "<option value='0' " + ("selected" if not ("channel" in ytb) else "") + ">   </option>" +\
-                        "\n".join(map(optionText, [x for x in range(10, 30)])) +\
+                        "\n".join(map(optionText, [x for x in range(10, 50)])) +\
                     "</select>" + "\n" +\
-                     thisname + "&nbsp;" + \
                     "<button class='action' data-url='/tablet/youtubeURL/" \
                         + encodedURL + "'  data-uri='"\
                         + ytb["url"] + "' data-name='" + thisname + "'>[    Play    ]</button>" + "\n" +\
+                    thisname + "&nbsp;" + \
                     "<button class='action' data-url='/tablet/history/remove/" +\
                     encodedURL + "' >[  Remove ]</button>" + "\n"\
                     "</div>" + "\n"
@@ -672,6 +673,10 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         elif pathList == list(["tablet", "reboot"]):
             httpd.adbShellCommand("reboot")
             self.writeResult("OK")
+        elif pathList == list(["tablet", "screen", "orientation"]):
+            allTheLines = httpd.adbShellCommand("dumpsys input | grep 'SurfaceOrientation'").decode("utf-8").splitlines()
+            line = allTheLines[0].rstrip().lstrip()
+            self.writeResult(line.split(':')[1])
         elif pathList[0] == "tablet" and pathList[1] == "history":
             youtb = None
             if len(pathList) >= 4:
