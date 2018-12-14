@@ -6,6 +6,8 @@ Usage::
     ./server.py [<port>]
 """
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import math
+import types
 import logging
 import subprocess
 import re
@@ -29,6 +31,8 @@ from urllib.parse import quote_plus, urlparse
 from urllib.request import urlopen
 from socketserver import ThreadingMixIn
 from threading import Thread
+
+ser = None
 
 class Gender:
     on = ""
@@ -60,7 +64,9 @@ def timeToSleepNever():
     return time.time() + 100*365*24*60*60  
 
 def reportText(text):
-    clockWs.send("{ \"type\": \"show\", \"text\": \"" + text + "\" }")
+    txt = "{ \"type\": \"show\", \"text\": \"" + text + "\" }"
+    clockWs.send(txt)
+    relayKitchen.send(txt)
 
 def timeBefore(timeInSecs):
     hoursToSwitchOff = int((timeInSecs - time.time())/60/60)
@@ -113,6 +119,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     settings = {}
     sleepAt = timeToSleepNever() # Sleep tablet at that time
     wakeAt = timeToSleepNever()
+
+    lastWeight = 0
+    lastWeightTime = time.time() - 10000
 
     # this URL is currently playing
     nowPlayingUrl = None
@@ -730,7 +739,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             milight.allWhite()
             self.writeResult("OK")
         elif pathList[0] == "relay":
-            for ws in allWs:
+            for ws in relays:
                 if ws.ip == ("192.168.121." + pathList[1]):
                     httpd.turnRelay(ws, int(pathList[2]), pathList[3] == "true")
         elif pathList[0] == "light" and pathList[1] == "brightness":
@@ -750,7 +759,27 @@ def isNumKey(k):
 
 def clockRemoteCommands(msg):
     if "type" in msg:
-        if msg["type"] == "ir_key":
+        if msg["type"] == "weight":
+            val = msg["value"] # reported weight
+
+            if (httpd.lastWeight == 0):
+                httpd.lastWeight = val
+                httpd.lastWeightTime = time.time()
+
+            delta = (val - httpd.lastWeight)
+            logging.info("Weight: " + str(delta))
+
+            if (delta > 500):
+                w = delta / 100
+                reportText(str(w) + "г")
+
+            if ((time.time() - httpd.lastWeightTime) > 3):
+                httpd.lastWeight = val
+                httpd.lastWeightTime = time.time()
+
+        elif msg["type"] == "hello":
+            pass
+        elif msg["type"] == "ir_key":
             now = time.time()
 
             # logging.info('Key: ' + msg["remote"] + ' ' + msg["key"] + ' ' + str(msg["timeseq"]))
@@ -781,6 +810,16 @@ def clockRemoteCommands(msg):
                         if channelFound != None:
                             httpd.playOnTablet(channelFound["url"], channelFound["name"])
                             break
+                elif k == "record" and msg["remote"] == "prologicTV":
+                    httpd.switchRelay(relayRoom, 0)
+                elif k == "stop" and msg["remote"] == "prologicTV":
+                    httpd.switchRelay(relayRoom, 2)
+                elif k == "time_shift" and msg["remote"] == "prologicTV":
+                    httpd.switchRelay(relayRoom, 3)
+                elif k == "av_source" and msg["remote"] == "prologicTV":
+                    httpd.switchRelay(relayKitchen, 0)
+                elif k == "clear" and msg["remote"] == "prologicTV":
+                    httpd.switchRelay(relayKitchen, 1)
                 elif k == "power":
                     httpd.playPause()
                 elif isNumKey(k) and isNumKey(prevKey[msg["remote"]]) and (now - last[msg["remote"]] < 2):
@@ -817,7 +856,7 @@ def clockRemoteCommands(msg):
                 prevKey[msg["remote"]] = k
                 last[msg["remote"]] = now
         else:
-            print("Unrecognized type:" + msg["type"])
+            logging.info("Unrecognized type:" + msg["type"])
     #elif "result" in msg:
     #    print(msg["result"])
 
@@ -827,19 +866,44 @@ def relayRemoteCommands(msg):
         print(msg)
 
 clockWs = DeviceCommunicationChannel("192.168.121.75", clockRemoteCommands, [])
-relayRoom = DeviceCommunicationChannel("192.168.121.93", clockRemoteCommands, [\
+
+relayRoom = DeviceCommunicationChannel("192.168.121.93", relayRemoteCommands, [\
     { "name": "Лампа на шкафу", "state": False, "gender": gFemale },\
     { "name": "Колонки", "state": False, "gender": gMany },\
     { "name": "Освещение в коридоре", "state": False, "gender": gThird },\
-    { "name": "Пустая релюха", "state": False, "gender": gFemale },\
+    { "name": "Потолок в комнате", "state": False, "gender": gFemale },\
 ])
-
 relayKitchen = DeviceCommunicationChannel("192.168.121.131", clockRemoteCommands, [\
     { "name": "Потолочная лампа на кухне", "state": False, "gender": gFemale },\
     { "name": "Лента освещения на кухне", "state": False, "gender": gFemale },\
 ])
+scalesKitchen = DeviceCommunicationChannel("192.168.121.68", clockRemoteCommands, [])
 
-allWs = [ clockWs, relayRoom, relayKitchen ]
+def relaySend(self, st):
+    logging.info(str(st))
+    js = json.loads(st)
+    if js["type"] == "switch":
+        on = js["on"]
+        rid = js["id"]
+        pin = [38, 40, 36, 32][int(rid)]
+
+        process = subprocess.Popen("/root/WiringOP/gpio/gpio -1 mode " + str(pin) + " out", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        resultOut, resultErr = process.communicate()
+        logging.info(resultOut)
+        logging.info(resultErr)
+
+        cmd = "/root/WiringOP/gpio/gpio -1 write " + str(pin) + " " + ("0" if on=="true" else "1")
+        logging.info(cmd)
+        process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        resultOut, resultErr = process.communicate()
+        logging.info(resultOut)
+        logging.info(resultErr)
+
+
+relayRoom.send = types.MethodType(relaySend, relayRoom)
+
+relays = [ relayKitchen, relayRoom ]
+allWs = [ clockWs, relayKitchen ] # , relayRoom, scalesKitchen
 
 def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8080):
     logging.basicConfig(level=logging.INFO)
