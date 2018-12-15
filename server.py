@@ -63,8 +63,8 @@ def nameForCompare(st):
 def timeToSleepNever():
     return time.time() + 100*365*24*60*60  
 
-def reportText(text):
-    txt = "{ \"type\": \"show\", \"text\": \"" + text + "\" }"
+def reportText(text, tune = False):
+    txt = "{ \"type\": \"" + ("tune" if tune else "show") + "\", \"text\": \"" + text + "\" }"
     clockWs.send(txt)
     relayKitchen.send(txt)
 
@@ -144,16 +144,19 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     def adbShellCommand(self, command):
         return self.server.adbShellCommand(command)
 
+    def reportSoundVol(self):
+        reportText("Vol" + str(httpd.getSoundVolInPercent()) + "%", tune = True)
+
     def volUp(self):
-        reportText("Vol+  ")
+        self.reportSoundVol()
         if httpd.getSoundVolInPercent() < 100:
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
-        reportText("Vol " + str(httpd.getSoundVolInPercent()) + "%   ")
+        self.reportSoundVol()
 
     def volDown(self):
-        reportText("Vol-  ")
+        self.reportSoundVol()
         self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
-        reportText("Vol " + str(httpd.getSoundVolInPercent()) + "%   ")
+        self.reportSoundVol()
 
     def turnRelay(self, relayComm, relay, on):
         relayComm.send("{ \"type\": \"switch\", \"id\": \"" + str(relay) + "\", \"on\": \"" + ("true" if on else "false") + "\" }")
@@ -878,7 +881,7 @@ relayRoom = DeviceCommunicationChannel("192.168.121.93", relayRemoteCommands, [\
     { "name": "Лампа на шкафу", "state": False, "gender": gFemale },\
     { "name": "Колонки", "state": False, "gender": gMany },\
     { "name": "Освещение в коридоре", "state": False, "gender": gThird },\
-    { "name": "Потолок в комнате", "state": False, "gender": gFemale },\
+    { "name": "Потолок в комнате", "state": False, "gender": gMale },\
 ])
 relayKitchen = DeviceCommunicationChannel("192.168.121.131", clockRemoteCommands, [\
     { "name": "Потолочная лампа на кухне", "state": False, "gender": gFemale },\
