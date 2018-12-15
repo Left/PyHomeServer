@@ -820,6 +820,13 @@ def clockRemoteCommands(msg):
                     httpd.switchRelay(relayKitchen, 0)
                 elif k == "clear" and msg["remote"] == "prologicTV":
                     httpd.switchRelay(relayKitchen, 1)
+                elif k == "fullscreen" and msg["remote"] == "prologicTV":
+                    if milight.on:
+                        reportText("Выключаем свет")
+                        milight.off()
+                    else:
+                        reportText("Включаем свет")
+                        milight.allWhite()
                 elif k == "power":
                     httpd.playPause()
                 elif isNumKey(k) and isNumKey(prevKey[msg["remote"]]) and (now - last[msg["remote"]] < 2):
