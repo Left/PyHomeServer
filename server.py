@@ -120,6 +120,9 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     sleepAt = timeToSleepNever() # Sleep tablet at that time
     wakeAt = timeToSleepNever()
 
+    currWeight = 0
+    currWeightTime = time.time() - 10000
+
     lastWeight = 0
     lastWeightTime = time.time() - 10000
 
@@ -144,17 +147,17 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     def adbShellCommand(self, command):
         return self.server.adbShellCommand(command)
 
-    def reportSoundVol(self):
-        reportText("Vol" + str(httpd.getSoundVolInPercent()) + "%", tune = True)
+    def reportSoundVol(self, force=True):
+        reportText("Vol" + str(httpd.getSoundVolInPercent() if force else httpd.getCachedSoundVolInPercent()) + "%", tune = True)
 
     def volUp(self):
-        self.reportSoundVol()
+        self.reportSoundVol(False)
         if httpd.getSoundVolInPercent() < 100:
             self.adbShellCommand("input keyevent KEYCODE_VOLUME_UP")
         self.reportSoundVol()
 
     def volDown(self):
-        self.reportSoundVol()
+        self.reportSoundVol(False)
         self.adbShellCommand("input keyevent KEYCODE_VOLUME_DOWN")
         self.reportSoundVol()
 
@@ -188,6 +191,11 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         self.nowPlayingUrl = None
         self.adbShellCommand("am force-stop org.videolan.vlc")
 
+    cachedSoundVol = 0
+
+    def getCachedSoundVolInPercent(self):
+        return self.cachedSoundVol
+
     def getSoundVolInPercent(self):
         allTheLines = self.adbShellCommand("dumpsys audio").decode("utf-8").split('- STREAM_')
         musicLines = next(filter(lambda ll: ll.startswith('MUSIC:'), allTheLines))
@@ -201,6 +209,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         maxVol = next(filter(lambda ll: ll.startswith("1000:"), allValues))
 
         retVol = int(float(currVol.split(': ')[1]) / float(maxVol.split(': ')[1]) * 100)
+        self.cachedSoundVol = retVol
         
         return retVol
 
@@ -773,12 +782,21 @@ def clockRemoteCommands(msg):
             logging.info("Weight: " + str(delta))
 
             if (delta > 500):
-                w = delta / 100
-                reportText(str(w) + "г")
+                w = delta / 600
+                reportText("{:.1f}".format(w), tune = True)
 
-            if ((time.time() - httpd.lastWeightTime) > 3):
+            if ((time.time() - httpd.currWeightTime) > 3):
                 httpd.lastWeight = val
                 httpd.lastWeightTime = time.time()
+
+            httpd.currWeight = val
+            httpd.currWeightTime = time.time()
+
+        elif msg["type"] == "temp":
+            val = msg["value"] # reported temp
+            # logging.info("TEMP: " + str(val))
+            if (int(time.time()) % 60 == 10):
+                reportText("{:+.1f}".format(val) + "C", tune = True)
 
         elif msg["type"] == "hello":
             pass
