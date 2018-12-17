@@ -129,6 +129,8 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     # this URL is currently playing
     nowPlayingUrl = None
 
+    temp = .0
+
     def __init__(self, *args):
         HTTPServer.__init__(self, *args)
         self.loadM3U()
@@ -546,6 +548,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                 " ".join(sorted(map(lambda c : "\t<option value='" + c + "'>" + c + "</option>\n", cats))))
             # Channels
             htmlContent = htmlContent.replace("<!--{{{channels}}}-->", strr)
+            htmlContent = htmlContent.replace("<!--{{{temp}}}-->", "{:+.1f}".format(httpd.temp) + "C")
 
             # Server settings
             htmlContent = htmlContent.replace("/*{{{serverSettings}}}*/", json.dumps({\
@@ -795,6 +798,7 @@ def clockRemoteCommands(msg):
         elif msg["type"] == "temp":
             val = msg["value"] # reported temp
             # logging.info("TEMP: " + str(val))
+            httpd.temp = val
             if (int(time.time()) % 60 == 10):
                 reportText("{:+.1f}".format(val) + "C", tune = True)
 
