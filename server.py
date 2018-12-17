@@ -61,10 +61,10 @@ def nameForCompare(st):
         .strip()
 
 def timeToSleepNever():
-    return time.time() + 100*365*24*60*60  
+    return 2000000000
 
-def reportText(text, tune = False):
-    txt = "{ \"type\": \"" + ("tune" if tune else "show") + "\", \"text\": \"" + text + "\" }"
+def reportText(text, mode = "show"):
+    txt = "{ \"type\": \"" + mode + "\", \"text\": \"" + text + "\" }"
     clockWs.send(txt)
     relayKitchen.send(txt)
 
@@ -72,7 +72,7 @@ def timeBefore(timeInSecs):
     hoursToSwitchOff = int((timeInSecs - time.time())/60/60)
     minsToSwitchOff = int((timeInSecs - time.time())/60)%60
     secsToSwitchOff = int((timeInSecs - time.time())%60)
-    return (str(hoursToSwitchOff) + "часов " if hoursToSwitchOff > 0 else "") + str(minsToSwitchOff) + " минут " + str(secsToSwitchOff) + " секунд"
+    return (str(hoursToSwitchOff) + "часов " if hoursToSwitchOff > 0 else "") + str(minsToSwitchOff) + " мин " + str(secsToSwitchOff) + " сек"
 
 
 class MiLight:
@@ -150,7 +150,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
         return self.server.adbShellCommand(command)
 
     def reportSoundVol(self, force=True):
-        reportText("Vol" + str(httpd.getSoundVolInPercent() if force else httpd.getCachedSoundVolInPercent()) + "%", tune = True)
+        reportText("Vol" + str(httpd.getSoundVolInPercent() if force else httpd.getCachedSoundVolInPercent()) + "%", mode = "tune")
 
     def volUp(self):
         self.reportSoundVol(False)
@@ -471,7 +471,7 @@ class DeviceCommunicationChannel():
                 pass
 
         def on_error(ws, error):
-            logging.info(self.ip + error)
+            logging.info(self.ip + str(error))
             self.ws.close()
 
         def on_close(ws):
@@ -786,7 +786,7 @@ def clockRemoteCommands(msg):
 
             if (delta > 500):
                 w = delta / 600
-                reportText("{:.1f}".format(w), tune = True)
+                reportText("{:.1f}".format(w), mode = "tune")
 
             if ((time.time() - httpd.currWeightTime) > 3):
                 httpd.lastWeight = val
@@ -797,12 +797,12 @@ def clockRemoteCommands(msg):
 
         elif msg["type"] == "temp":
             val = msg["value"] # reported temp
-            # logging.info("TEMP: " + str(val))
             httpd.temp = val
-            if (int(time.time()) % 60 == 10):
-                reportText("{:+.1f}".format(val) + "C", tune = True)
-
+            reportText("{:+.1f}".format(val) + "\xB0" + \
+                ((" до выключения " + timeBefore(httpd.sleepAt)) if httpd.sleepAt != timeToSleepNever() else ""),\
+                mode = "additional-info")
         elif msg["type"] == "hello":
+            logging.info("After last restart: " + str(msg["afterRestart"]))
             pass
         elif msg["type"] == "ir_key":
             now = time.time()
