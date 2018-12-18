@@ -102,7 +102,7 @@
 
             document.getElementById('wakeBtn').addEventListener('click', 
                 function(e) {
-                    sendReq("/tablet/wakeat/" + (selHours.selectedIndex) + "/" + (selMins.selectedIndex));
+                    sendReq("/tablet/wakeat/" + (selHours.selectedIndex) + "/" + (selMins.selectedIndex) + "/" + (wakeChannel.selectedOptions[0].value));
                 }, false);
 
             document.getElementById('sleepBtn').addEventListener('click', () => {
@@ -179,6 +179,9 @@
                 &nbsp;&nbsp;
                 <select id='wakehrs'></select>&nbsp;
                 <select id='wakemins'></select>&nbsp;
+
+                <select id='wakeChannel'><!--{{{wakeChannels}}}--></select>&nbsp;
+
                 <button id='wakeBtn'> Wake!  </button>
             </div>
             <hr/>

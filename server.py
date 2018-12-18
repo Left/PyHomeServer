@@ -119,6 +119,7 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     settings = {}
     sleepAt = timeToSleepNever() # Sleep tablet at that time
     wakeAt = timeToSleepNever()
+    wakeChan = 29
 
     currWeight = 0
     currWeightTime = time.time() - 10000
@@ -384,6 +385,24 @@ class ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
                     "cat": "Z: built-in"\
                 })
             self.youtubeChannels.append({\
+                    "name": 'Радио Маяк',\
+                    "url": 'http://icecast.vgtrk.cdnvideo.ru/mayakfm_mp3_192kbps',\
+                    "cat": "Z: built-in"\
+                })
+
+            self.youtubeChannels.append({\
+                    "name": 'Эхо Москвы',\
+                    "url": 'http://ice912.echo.msk.ru:9120/stream',\
+                    "cat": "Z: built-in"\
+                })
+
+            self.youtubeChannels.append({\
+                    "name": 'Relax FM',\
+                    "url": 'http://ic2.101.ru:8000/v13_1?setst=094548200140236612420140625&amp;tok=75urgZKbvvpyTQMDZ1H4Hfqy5FKeKsXaPod7argnUF%2BwRqI%2Fy3MhBg%3D%3D',\
+                    "cat": "Z: built-in"\
+                })
+
+            self.youtubeChannels.append({\
                     "name": 'Пикник на 101',\
                     "url": 'http://ic5.101.ru:8000/a157?userid=0&setst=e5l2bv8j2v1jsagt3rtc3teoq8&tok=07790631dkVJeVFPUWNKdjRGRFp2d0tySWJST3JWQy8yVnphbHVTL3R3QmJJeEZ1WjEvY3ViV3RtUjJrZ3UrVWFualdDVA%3D%3D2',\
                     "cat": "Z: built-in"\
@@ -550,6 +569,22 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
             htmlContent = htmlContent.replace("<!--{{{channels}}}-->", strr)
             htmlContent = htmlContent.replace("<!--{{{temp}}}-->", "{:+.1f}".format(httpd.temp) + "C")
 
+
+            def chanName(ytb):
+                thisname = ytb["name"]
+                if ytb["url"] in self.server.youtubeChannelsByUrls:
+                    thisname = self.server.youtubeChannelsByUrls[ytb["url"]]["name"]
+                return thisname
+
+            def historyChannel(ytb):
+                sel = self.server.wakeChan == ytb["channel"]
+                return "<option value='" + str(ytb["channel"]) + "'" +\
+                            ("selected" if sel else "") + " " +\
+                            ">" + str(ytb["channel"]) + ". " + chanName(ytb) + "</option>"                
+
+            htmlContent = htmlContent.replace("<!--{{{wakeChannels}}}-->", \
+                "\n".join(map(historyChannel, filter(lambda ytb: "channel" in ytb, self.server.youtubeHistory))))
+
             # Server settings
             htmlContent = htmlContent.replace("/*{{{serverSettings}}}*/", json.dumps({\
                     # "sleepAt": datetime.datetime.fromtimestamp(httpd.sleepAt).isoformat(),\
@@ -563,9 +598,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
                     channelsUsed.add(ytb["channel"])
 
             for ytb in reversed(self.server.youtubeHistory):
-                thisname = ytb["name"]
-                if ytb["url"] in self.server.youtubeChannelsByUrls:
-                    thisname = self.server.youtubeChannelsByUrls[ytb["url"]]["name"]
+                thisname = chanName(ytb)
 
                 encodedURL = urllib.parse.quote(ytb["url"], safe='')
 
@@ -737,6 +770,7 @@ class HomeHTTPHandler(BaseHTTPRequestHandler):
         elif pathList[0] == "tablet" and pathList[1] == "wakeat":
             hrs = int(pathList[2])
             mins = int(pathList[3])
+            httpd.wakeChan = int(pathList[4])
             now = datetime.datetime.now()
             if hrs < now.hour or (hrs == now.hour and mins < now.minute):
                 #tomorrow
@@ -1001,7 +1035,7 @@ def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=
                     if not httpd.isTabletAwake():
                         httpd.stopCurrent()
                         httpd.toggleTabletPower()
-                    ytb = httpd.getByChannelOrNone(29)
+                    ytb = httpd.getByChannelOrNone(httpd.wakeChan)
                     if ytb != None:
                         httpd.playYoutubeURL(ytb["url"])
                     httpd.settings["wakeAt"] = httpd.wakeAt = timeToSleepNever()
