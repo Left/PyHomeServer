@@ -819,7 +819,7 @@ def clockRemoteCommands(msg):
             logging.info("Weight: " + str(delta))
 
             if (delta > 500):
-                w = delta / 600
+                w = delta / 410
                 reportText("{:.1f}".format(w), mode = "tune")
 
             if ((time.time() - httpd.currWeightTime) > 3):
@@ -828,7 +828,10 @@ def clockRemoteCommands(msg):
 
             httpd.currWeight = val
             httpd.currWeightTime = time.time()
-
+        elif msg["type"] == "button":
+            httpd.lastWeight = httpd.currWeight
+            httpd.lastWeightTime = httpd.currWeightTime
+            logging.info("=== Tare! ===")
         elif msg["type"] == "temp":
             val = msg["value"] # reported temp
             httpd.temp = val
@@ -969,7 +972,7 @@ def relaySend(self, st):
 relayRoom.send = types.MethodType(relaySend, relayRoom)
 
 relays = [ relayKitchen, relayRoom ]
-allWs = [ clockWs, relayKitchen ] # , relayRoom, scalesKitchen
+allWs = [ clockWs, relayKitchen, scalesKitchen ]
 
 def run(server_class=ThreadingSimpleServer, handler_class=HomeHTTPHandler, port=8080):
     logging.basicConfig(level=logging.INFO)
